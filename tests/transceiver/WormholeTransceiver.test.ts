@@ -210,7 +210,7 @@ describe("WormholeTransceiver", () => {
     });
 
     test("succeeds to initialise and sets correct state", async () => {
-      const APP_MIN_BALANCE = (235_000).microAlgos();
+      const APP_MIN_BALANCE = (183_100).microAlgos();
 
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,

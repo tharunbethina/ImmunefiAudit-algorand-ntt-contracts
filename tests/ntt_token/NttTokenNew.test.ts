@@ -91,7 +91,7 @@ describe("NttTokenNew", () => {
     });
 
     test("succeeds to initialise and sets correct state", async () => {
-      const APP_MIN_BALANCE = (290_000).microAlgos();
+      const APP_MIN_BALANCE = (255_400).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),
@@ -150,7 +150,7 @@ describe("NttTokenNew", () => {
   describe("mint", () => {
     beforeAll(async () => {
       // set minter role
-      const APP_MIN_BALANCE = (45_000).microAlgos();
+      const APP_MIN_BALANCE = (27_700).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),

@@ -167,7 +167,7 @@ describe("TransceiverManager", () => {
       expect(await client.isMessageHandlerKnown({ args: [messageHandlerAppId] })).toBeFalsy();
 
       // add message handler
-      const APP_MIN_BALANCE = (290_000).microAlgos();
+      const APP_MIN_BALANCE = (159_900).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),
@@ -218,7 +218,7 @@ describe("TransceiverManager", () => {
       expect(await client.isMessageHandlerKnown({ args: [messageHandlerAppIdWithNoTransceivers] })).toBeFalsy();
 
       // add message handler
-      const APP_MIN_BALANCE = (290_000).microAlgos();
+      const APP_MIN_BALANCE = (59_900).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),
@@ -303,18 +303,28 @@ describe("TransceiverManager", () => {
     // use is_transceiver_configured and get_handler_transceivers within tests
     test("succeeds when adding one transceiver", async () => {
       const transceiverAppId = transceiverAppIds[0];
-      const res = await client.send.addTransceiver({
-        sender: admin,
-        args: [messageHandlerAppId, transceiverAppId],
-        boxReferences: [
-          getAddressRolesBoxKey(MESSAGE_HANDLER_ADMIN_ROLE(messageHandlerAppId), admin.publicKey),
-          getHandlerTransceiversBoxKey(messageHandlerAppId),
-        ],
+      const APP_MIN_BALANCE = (3_200).microAlgos();
+      const fundingTxn = await localnet.algorand.createTransaction.payment({
+        sender: creator,
+        receiver: getApplicationAddress(appId),
+        amount: APP_MIN_BALANCE,
       });
+      const res = await client
+        .newGroup()
+        .addTransaction(fundingTxn)
+        .addTransceiver({
+          sender: admin,
+          args: [messageHandlerAppId, transceiverAppId],
+          boxReferences: [
+            getAddressRolesBoxKey(MESSAGE_HANDLER_ADMIN_ROLE(messageHandlerAppId), admin.publicKey),
+            getHandlerTransceiversBoxKey(messageHandlerAppId),
+          ],
+        })
+        .send();
 
       expect(await client.isTransceiverConfigured({ args: [messageHandlerAppId, transceiverAppId] })).toBeTruthy();
       expect(await client.getHandlerTransceivers({ args: [messageHandlerAppId] })).toEqual([transceiverAppId]);
-      expect(res.confirmations[0].logs![0]).toEqual(
+      expect(res.confirmations[1].logs![0]).toEqual(
         getEventBytes("TransceiverAdded(uint64,uint64)", [messageHandlerAppId, transceiverAppId]),
       );
     });
@@ -338,6 +348,15 @@ describe("TransceiverManager", () => {
     });
 
     test("succeeds when adding MAX_TRANSCEIVERS transceivers", async () => {
+      // prefund with min balance
+      const APP_MIN_BALANCE = (3_200 * (Number(MAX_TRANSCEIVERS) - 1)).microAlgos();
+      await localnet.algorand.send.payment({
+        sender: admin,
+        receiver: getApplicationAddress(appId),
+        amount: APP_MIN_BALANCE,
+      });
+
+      // add transceivers
       for (let i = 1; i < MAX_TRANSCEIVERS; i++) {
         const transceiverAppId = transceiverAppIds[i];
 

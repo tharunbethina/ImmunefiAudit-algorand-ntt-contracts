@@ -86,7 +86,7 @@ describe("NttToken", () => {
     });
 
     test("succeeds to initialise and sets correct state", async () => {
-      const APP_MIN_BALANCE = (145_000).microAlgos();
+      const APP_MIN_BALANCE = (127_700).microAlgos();
       const assetId = 123n;
 
       const fundingTxn = await localnet.algorand.createTransaction.payment({
@@ -115,7 +115,7 @@ describe("NttToken", () => {
   describe("set minter", () => {
     beforeAll(async () => {
       // fund for enough balance for one role
-      const APP_MIN_BALANCE = (45_000).microAlgos();
+      const APP_MIN_BALANCE = (27_700).microAlgos();
       await localnet.algorand.send.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),

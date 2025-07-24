@@ -143,7 +143,7 @@ describe("NttRateLimiter", () => {
     });
 
     test("succeeds to initialise and sets correct state", async () => {
-      const APP_MIN_BALANCE = (244_900).microAlgos();
+      const APP_MIN_BALANCE = (210_300).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),
@@ -507,7 +507,7 @@ describe("NttRateLimiter", () => {
         getEventBytes("BucketConsumed(byte[32],uint256)", [outboundBucketId, untrimmedAmount]),
       );
       expect(res.confirmations[1].logs![1]).toEqual(
-        getEventBytes("BucketFilled(byte[32],uint256)", [inboundBucketId, fillAmount]),
+        getEventBytes("BucketFilled(byte[32],uint256,uint256)", [inboundBucketId, untrimmedAmount, fillAmount]),
       );
     });
   });
@@ -647,7 +647,7 @@ describe("NttRateLimiter", () => {
         getEventBytes("BucketConsumed(byte[32],uint256)", [inboundBucketId, untrimmedAmount]),
       );
       expect(res.confirmations[1].logs![1]).toEqual(
-        getEventBytes("BucketFilled(byte[32],uint256)", [outboundBucketId, fillAmount]),
+        getEventBytes("BucketFilled(byte[32],uint256,uint256)", [outboundBucketId, untrimmedAmount, fillAmount]),
       );
     });
   });
