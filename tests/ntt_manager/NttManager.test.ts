@@ -342,7 +342,7 @@ describe("NttManager", () => {
     });
 
     test("succeeds to initialise and sets correct state", async () => {
-      const APP_MIN_BALANCE = (334_900).microAlgos();
+      const APP_MIN_BALANCE = (265_700).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),
@@ -953,7 +953,7 @@ describe("NttManager", () => {
         getEventBytes("BucketConsumed(byte[32],uint256)", [outboundBucketId, untrimmedAmount]),
       );
       expect(res.confirmations[3].logs![1]).toEqual(
-        getEventBytes("BucketFilled(byte[32],uint256)", [inboundBucketId, fillAmount]),
+        getEventBytes("BucketFilled(byte[32],uint256,uint256)", [inboundBucketId, untrimmedAmount, fillAmount]),
       );
       expect(res.confirmations[3].logs![2]).toEqual(
         getEventBytes("TransferSent(byte[32],byte[32],uint16,uint64,uint64)", [
@@ -1057,7 +1057,7 @@ describe("NttManager", () => {
         getEventBytes("BucketConsumed(byte[32],uint256)", [outboundBucketId, untrimmedAmount]),
       );
       expect(res.confirmations[3].logs![1]).toEqual(
-        getEventBytes("BucketFilled(byte[32],uint256)", [inboundBucketId, fillAmount]),
+        getEventBytes("BucketFilled(byte[32],uint256,uint256)", [inboundBucketId, untrimmedAmount, fillAmount]),
       );
       expect(res.confirmations[3].logs![2]).toEqual(
         getEventBytes("TransferSent(byte[32],byte[32],uint16,uint64,uint64)", [
@@ -1526,7 +1526,7 @@ describe("NttManager", () => {
         getEventBytes("BucketConsumed(byte[32],uint256)", [outboundBucketId, untrimmedAmount]),
       );
       expect(res.confirmations[3].logs![1]).toEqual(
-        getEventBytes("BucketFilled(byte[32],uint256)", [inboundBucketId, fillAmount]),
+        getEventBytes("BucketFilled(byte[32],uint256,uint256)", [inboundBucketId, untrimmedAmount, fillAmount]),
       );
       expect(res.confirmations[3].logs![2]).toEqual(
         getEventBytes("TransferSent(byte[32],byte[32],uint16,uint64,uint64)", [
@@ -1643,7 +1643,7 @@ describe("NttManager", () => {
         getEventBytes("BucketConsumed(byte[32],uint256)", [outboundBucketId, untrimmedAmount]),
       );
       expect(res.confirmations[3].logs![1]).toEqual(
-        getEventBytes("BucketFilled(byte[32],uint256)", [inboundBucketId, fillAmount]),
+        getEventBytes("BucketFilled(byte[32],uint256,uint256)", [inboundBucketId, untrimmedAmount, fillAmount]),
       );
       expect(res.confirmations[3].logs![2]).toEqual(
         getEventBytes("TransferSent(byte[32],byte[32],uint16,uint64,uint64)", [
