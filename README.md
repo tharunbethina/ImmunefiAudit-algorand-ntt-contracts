@@ -7,7 +7,7 @@ This repository contains the PuyaPy implementation for Wormhole NTT on Algorand.
 ## Requirements
 
 - Linux or macOS
-- Python 3
+- Python 3.12+
 - AlgoKit
 
 ## Setup
@@ -26,15 +26,15 @@ npm install
 
 ## Smart Contracts
 
-The `contracts` folder contains the following:
+The `ntt_contracts` folder contains the following:
 
-- `contracts/external` contains the external smart contracts which are referenced but are not strictly part of the NTT implementation.
-- `contracts/library` contains library smart contracts which are used. Some of these (like OpUp) are used for testing purposes.
-- `contract/ntt_manager` contains the smart contracts relating to the NTT manager, the entry point for users to transfer and receive tokens between chains.
-- `contract/ntt_token` contains the smart contracts which are used to make an ASA an NTT token.
-- `contracts/transceiver` contains the smart contracts to send and receive messages between chains.
+- `ntt_contracts/external` contains the external smart contracts which are referenced but are not strictly part of the NTT implementation.
+- `ntt_contracts/library` contains library smart contracts which are used. Some of these (like OpUp) are used for testing purposes.
+- `ntt_contracts/ntt_manager` contains the smart contracts relating to the NTT manager, the entry point for users to transfer and receive tokens between chains.
+- `ntt_contracts/ntt_token` contains the smart contracts which are used to make an ASA an NTT token.
+- `ntt_contracts/transceiver` contains the smart contracts to send and receive messages between chains.
 
-In addition, there are multiple `test` folders within the `contracts` folder which are used solely for unit testing. They should not be considered safe to use.
+In addition, there are multiple `test` folders within the `ntt_contracts` folder which are used solely for unit testing. They should not be considered safe to use.
 
 ## Compilation
 
