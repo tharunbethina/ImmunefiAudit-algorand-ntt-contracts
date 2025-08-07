@@ -51,7 +51,7 @@ export async function getWormholeEmitterLSig(
   wormholeCoreAppId: number | bigint,
 ) {
   const { compiledBase64ToBytes: compiledEmitterLogicSig } = await localnet.algorand.app.compileTealTemplate(
-    readFileSync("contracts/external/wormhole/TmplSig.teal").toString(),
+    readFileSync("ntt_contracts/external/wormhole/TmplSig.teal").toString(),
     {
       ADDR_IDX: 0,
       EMITTER_ID: getApplicationAddress(emitterAppId).publicKey,
