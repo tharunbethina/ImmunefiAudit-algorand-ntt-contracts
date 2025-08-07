@@ -132,7 +132,7 @@ describe("WormholeTransceiver", () => {
       createParams: {
         sender: creator,
         method: "create",
-        args: [transceiverManagerAppId, wormholeCoreAppId, relayerAppId, SOURCE_CHAIN_ID, MIN_UPGRADE_DELAY],
+        args: [transceiverManagerAppId, wormholeCoreAppId, SOURCE_CHAIN_ID, true, relayerAppId, MIN_UPGRADE_DELAY],
         appReferences: [wormholeCoreAppId],
       },
     });
@@ -153,9 +153,10 @@ describe("WormholeTransceiver", () => {
     expect(await client.state.global.version()).toEqual(1n);
     expect(await client.state.global.transceiverManager()).toEqual(transceiverManagerAppId);
     expect(await client.state.global.wormholeCore()).toEqual(wormholeCoreAppId);
-    expect(await client.state.global.wormholeRelayer()).toEqual(relayerAppId);
     expect(await client.state.global.chainId()).toEqual(SOURCE_CHAIN_ID);
     expect(await client.state.global.emitterLsig()).toEqual(emitterLogicSig.toString());
+    expect(await client.state.global.isWormholeRelayingEnabled()).toBeTruthy();
+    expect(await client.state.global.wormholeRelayer()).toEqual(relayerAppId);
     expect(await client.state.global.relayerDefaultGasLimit()).toBeUndefined();
 
     expect(Uint8Array.from(await client.defaultAdminRole())).toEqual(DEFAULT_ADMIN_ROLE);
@@ -169,6 +170,12 @@ describe("WormholeTransceiver", () => {
   describe("when uninitialised", () => {
     test("fails to set wormhole relayer", async () => {
       await expect(client.send.setWormholeRelayer({ sender: user, args: [0] })).rejects.toThrow(
+        "Uninitialised contract",
+      );
+    });
+
+    test("fails to set is wormhole relayer enabled", async () => {
+      await expect(client.send.setIsWormholeRelayingEnabled({ sender: user, args: [false] })).rejects.toThrow(
         "Uninitialised contract",
       );
     });
@@ -267,6 +274,35 @@ describe("WormholeTransceiver", () => {
         boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
       });
       expect(await client.state.global.wormholeRelayer()).toEqual(relayerAppId);
+    });
+  });
+
+  describe("set is wormhole relaying enabled", () => {
+    test("fails when caller is not manager", async () => {
+      await expect(
+        client.send.setIsWormholeRelayingEnabled({
+          sender: user,
+          args: [false],
+          boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, user.publicKey)],
+        }),
+      ).rejects.toThrow("Access control unauthorised account");
+    });
+
+    test("succeeds", async () => {
+      await client.send.setIsWormholeRelayingEnabled({
+        sender: admin,
+        args: [false],
+        boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
+      });
+      expect(await client.state.global.isWormholeRelayingEnabled()).toBeFalsy();
+
+      // restore
+      await client.send.setIsWormholeRelayingEnabled({
+        sender: admin,
+        args: [true],
+        boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
+      });
+      expect(await client.state.global.isWormholeRelayingEnabled()).toBeTruthy();
     });
   });
 
@@ -372,6 +408,27 @@ describe("WormholeTransceiver", () => {
       ).rejects.toThrow("Unknown peer chain");
     });
 
+    test("fails for automatic relayer when disabled", async () => {
+      const message = getRandomMessageToSend({ destinationChainId: Number(PEER_CHAIN_ID) });
+      const instruction = convertBooleanToByte(false);
+      await expect(
+        client
+          .newGroup()
+          .setIsWormholeRelayingEnabled({
+            sender: admin,
+            args: [false],
+            boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
+          })
+          .quoteDeliveryPrice({
+            sender: user,
+            args: [message, instruction],
+            appReferences: [appId, wormholeCoreAppId, relayerAppId],
+            boxReferences: [{ appId, name: getWormholePeersBoxKey(PEER_CHAIN_ID) }],
+          })
+          .send(),
+      ).rejects.toThrow("Wormhole relaying is not enabled");
+    });
+
     test.each([
       { name: "empty instruction", instruction: Uint8Array.from([]) },
       { name: "non-empty instruction", instruction: convertBooleanToByte(false) },
@@ -443,6 +500,34 @@ describe("WormholeTransceiver", () => {
           extraFee: (2000).microAlgos(),
         }),
       ).rejects.toThrow("0,1: Unknown peer chain");
+    });
+
+    test("fails for automatic relayer when disabled", async () => {
+      const message = getRandomMessageToSend({ destinationChainId: Number(PEER_CHAIN_ID) });
+      const instruction = convertBooleanToByte(false);
+      const emitterLsig = await client.state.global.emitterLsig();
+
+      const {
+        transactions: [disableTxn],
+      } = await client.createTransaction.setIsWormholeRelayingEnabled({
+        sender: admin,
+        args: [false],
+        boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
+      });
+      await expect(
+        transceiverManagerClient
+          .newGroup()
+          .addTransaction(disableTxn)
+          .sendMessage({
+            sender: user,
+            args: [appId, WORMHOLE_CORE_MESSAGE_FEE + RELAYER_NATIVE_FEE.microAlgos, message, instruction],
+            accountReferences: [emitterLsig!],
+            appReferences: [appId, wormholeCoreAppId, relayerAppId],
+            boxReferences: [{ appId, name: getWormholePeersBoxKey(PEER_CHAIN_ID) }],
+            extraFee: (7000).microAlgos(),
+          })
+          .send(),
+      ).rejects.toThrow("Wormhole relaying is not enabled");
     });
 
     test.each([

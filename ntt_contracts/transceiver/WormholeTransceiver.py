@@ -39,12 +39,17 @@ class WormholeTransceiver(Transceiver, ICustomWormholeReceiver, InitialisableWit
         Transceiver.__init__(self)
         InitialisableWithCreator.__init__(self)
 
+        # wormhole source chain constants
         self.wormhole_core = GlobalState(UInt64)
-        self.wormhole_relayer = GlobalState(UInt64)
         self.chain_id = GlobalState(UInt64)
         self.emitter_lsig = GlobalState(Address)
+
+        # relayer config
+        self.is_wormhole_relaying_enabled = GlobalState(Bool)
+        self.wormhole_relayer = GlobalState(UInt64)
         self.relayer_default_gas_limit = GlobalState(UInt64)
 
+        # messaging
         self.wormhole_peers = BoxMap(UInt16, Bytes32, key_prefix=b"wormhole_peer_")
         self.vaas_consumed = BoxMap(Bytes32, Bool, key_prefix=b"vaas_consumed_")
 
@@ -53,15 +58,19 @@ class WormholeTransceiver(Transceiver, ICustomWormholeReceiver, InitialisableWit
         self,
         transceiver_manager: UInt64,
         wormhole_core: UInt64,
-        wormhole_relayer: UInt64,
         chain_id: UInt64,
+        is_wormhole_relaying_enabled: Bool,
+        wormhole_relayer: UInt64,
         min_upgrade_delay: UInt64
     ) -> None:
         Transceiver.create(self, transceiver_manager, min_upgrade_delay)
+
         self.wormhole_core.value = wormhole_core
-        self.wormhole_relayer.value = wormhole_relayer
         self.chain_id.value = chain_id
         self.emitter_lsig.value = self._calculate_emitter_lsig()
+
+        self.is_wormhole_relaying_enabled.value = is_wormhole_relaying_enabled
+        self.wormhole_relayer.value = wormhole_relayer
 
     @abimethod
     def initialise(self, admin: Address) -> None: # type: ignore[override]
@@ -83,6 +92,18 @@ class WormholeTransceiver(Transceiver, ICustomWormholeReceiver, InitialisableWit
         self._check_sender_role(self.manager_role())
 
         self.wormhole_relayer.value = wormhole_relayer
+
+    @abimethod
+    def set_is_wormhole_relaying_enabled(self, is_enabled: Bool) -> None:
+        """Set whether wormhole relaying is enabled.
+
+         Args:
+             is_enabled: Whether enabled or not
+         """
+        self._only_initialised()
+        self._check_sender_role(self.manager_role())
+
+        self.is_wormhole_relaying_enabled.value = is_enabled
 
     @abimethod
     def set_relayer_default_gas_limit(self, gas_limit: UInt64) -> None:
@@ -243,6 +264,8 @@ class WormholeTransceiver(Transceiver, ICustomWormholeReceiver, InitialisableWit
         if we_ins.should_skip_relayer_send:
             return core_fee
         else:
+            self._check_wormhole_relaying_is_enabled()
+
             relayer_fee, txn = abi_call(
                 IRelayer.quote_delivery_price,
                 message.destination_chain_id,
@@ -289,6 +312,8 @@ class WormholeTransceiver(Transceiver, ICustomWormholeReceiver, InitialisableWit
         # request message delivery if needed
         we_ins = self._parse_transceiver_instruction(transceiver_instruction)
         if not we_ins.should_skip_relayer_send:
+            self._check_wormhole_relaying_is_enabled()
+
             sequence = self._get_wormhole_emitter_sequence()
             payment = itxn.Payment(receiver=self._get_wormhole_relayer_address(), amount=total_fee - core_fee, fee=0)
             abi_call(
@@ -335,6 +360,10 @@ class WormholeTransceiver(Transceiver, ICustomWormholeReceiver, InitialisableWit
         wormhole_relayer_address, exists = op.AppParamsGet.app_address(self.wormhole_relayer.value)
         assert exists, "Wormhole Relayer address unknown"
         return wormhole_relayer_address
+
+    @subroutine
+    def _check_wormhole_relaying_is_enabled(self) -> None:
+        assert self.is_wormhole_relaying_enabled.value, "Wormhole relaying is not enabled"
 
     @subroutine
     def _only_relayer(self) -> None:

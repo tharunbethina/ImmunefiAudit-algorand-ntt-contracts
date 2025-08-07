@@ -63,7 +63,7 @@ npm run test
 or single test file using:
 
 ```bash
-PYTHONPATH="./contracts" npx jest <PATH_TO_TEST_FILE>
+jest <PATH_TO_TEST_FILE>
 ```
 
 It is not possible to run the tests in parallel so `--runInBand` option is passed.
