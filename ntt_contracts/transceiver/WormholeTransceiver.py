@@ -238,7 +238,7 @@ class WormholeTransceiver(Transceiver, ICustomWormholeReceiver, InitialisableWit
         message_payload = op.substring(handler_payload, index, handler_payload.length)
 
         # deliver message to TransceiverManager
-        # NEED TO VERIFY RECIPIENT CHAIN IN HANDLER
+        # IMPORTANT: must verify the recipient chain in the concrete MessageHandler
         self._deliver_message(MessageReceived(
             id=message_id,
             user_address=message_user_address,

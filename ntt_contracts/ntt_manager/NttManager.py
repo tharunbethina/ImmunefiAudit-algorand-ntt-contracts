@@ -391,7 +391,7 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
             message_digest
         )
         if not is_enqueued:
-            abi_call(INttToken.mint, Address(Txn.sender), untrimmed_amount, app_id=self.ntt_token.value, fee=0)
+            abi_call(INttToken.mint, recipient, untrimmed_amount, app_id=self.ntt_token.value, fee=0)
 
     @subroutine
     def _get_asset_decimals(self) -> UInt8:

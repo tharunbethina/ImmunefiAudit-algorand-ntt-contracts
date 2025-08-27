@@ -1,14 +1,8 @@
 from abc import ABC, abstractmethod
 from algopy import ARC4Contract, UInt64, gtxn
-from algopy.arc4 import Address, Bool, Struct, UInt16, abimethod
+from algopy.arc4 import Bool, UInt16, abimethod
 
-from ...types import ARC4UInt64, Bytes32, TransceiverInstructions, MessageReceived
-
-
-# Events
-class Minted(Struct):
-    receiver: Address
-    amount: ARC4UInt64
+from ...types import Bytes32, TransceiverInstructions
 
 
 class INttManager(ARC4Contract, ABC):

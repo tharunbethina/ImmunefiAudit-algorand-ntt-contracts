@@ -3,7 +3,6 @@ from algopy import Account, GlobalState, UInt64, itxn, op
 from algopy.arc4 import Address, abimethod, emit
 
 from folks_contracts.library.extensions.InitialisableWithCreator import InitialisableWithCreator
-from folks_contracts.library.AccessControl import AccessControl
 from folks_contracts.library.Upgradeable import Upgradeable
 from ..types import ARC4UInt64, Bytes16
 from .interfaces.INttToken import Minted, INttToken
@@ -12,7 +11,6 @@ from .interfaces.INttToken import Minted, INttToken
 # Reference implementation of NttToken
 class NttToken(INttToken, Upgradeable, InitialisableWithCreator, ABC):
     def __init__(self) -> None:
-        AccessControl.__init__(self)
         Upgradeable.__init__(self)
         InitialisableWithCreator.__init__(self)
 

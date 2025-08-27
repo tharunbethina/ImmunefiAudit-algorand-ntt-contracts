@@ -87,6 +87,7 @@ describe("NttManager", () => {
   let creator: Address & Account & TransactionSignerAccount;
   let admin: Address & Account & TransactionSignerAccount;
   let user: Address & Account & TransactionSignerAccount;
+  let relayer: Address & Account & TransactionSignerAccount;
 
   beforeAll(async () => {
     await localnet.newScope();
@@ -95,6 +96,7 @@ describe("NttManager", () => {
     creator = await generateAccount({ initialFunds: (100).algo() });
     admin = await generateAccount({ initialFunds: (100).algo() });
     user = await generateAccount({ initialFunds: (100).algo() });
+    relayer = await generateAccount({ initialFunds: (100).algo() });
 
     factory = algorand.client.getTypedAppFactory(NttManagerFactory, {
       defaultSender: creator,
@@ -2080,7 +2082,7 @@ describe("NttManager", () => {
       // execute message
       await expect(
         client.send.executeMessage({
-          sender: user,
+          sender: relayer,
           args: [messageReceived],
           appReferences: [transceiverManagerAppId],
           boxReferences: [getMessagesExecutedBoxKey(messageDigest)],
@@ -2108,7 +2110,7 @@ describe("NttManager", () => {
       // execute message
       await expect(
         client.send.executeMessage({
-          sender: user,
+          sender: relayer,
           args: [messageReceived],
           appReferences: [transceiverManagerAppId],
           boxReferences: [getMessagesExecutedBoxKey(messageDigest)],
@@ -2136,7 +2138,7 @@ describe("NttManager", () => {
       // execute message
       await expect(
         client.send.executeMessage({
-          sender: user,
+          sender: relayer,
           args: [messageReceived],
           appReferences: [transceiverManagerAppId],
           boxReferences: [getMessagesExecutedBoxKey(messageDigest)],
@@ -2164,7 +2166,7 @@ describe("NttManager", () => {
       // execute message
       await expect(
         client.send.executeMessage({
-          sender: user,
+          sender: relayer,
           args: [messageReceived],
           appReferences: [transceiverManagerAppId],
           boxReferences: [getMessagesExecutedBoxKey(messageDigest)],
@@ -2198,7 +2200,7 @@ describe("NttManager", () => {
       // execute message
       const APP_MIN_BALANCE = (68_600).microAlgo();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
-        sender: user,
+        sender: relayer,
         receiver: getApplicationAddress(appId),
         amount: APP_MIN_BALANCE,
       });
@@ -2206,7 +2208,7 @@ describe("NttManager", () => {
         .newGroup()
         .addTransaction(fundingTxn)
         .executeMessage({
-          sender: user,
+          sender: relayer,
           args: [messageReceived],
           appReferences: [transceiverManagerAppId],
           boxReferences: [
@@ -2261,7 +2263,7 @@ describe("NttManager", () => {
       // execute message
       const APP_MIN_BALANCE = (22_900).microAlgo();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
-        sender: user,
+        sender: relayer,
         receiver: getApplicationAddress(appId),
         amount: APP_MIN_BALANCE,
       });
@@ -2269,7 +2271,7 @@ describe("NttManager", () => {
         .newGroup()
         .addTransaction(fundingTxn)
         .executeMessage({
-          sender: user,
+          sender: relayer,
           args: [messageReceived],
           appReferences: [transceiverManagerAppId],
           boxReferences: [
@@ -2311,7 +2313,7 @@ describe("NttManager", () => {
       // execute message
       const APP_MIN_BALANCE = (68_600).microAlgo();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
-        sender: user,
+        sender: relayer,
         receiver: getApplicationAddress(appId),
         amount: APP_MIN_BALANCE,
       });
@@ -2319,7 +2321,7 @@ describe("NttManager", () => {
         .newGroup()
         .addTransaction(fundingTxn)
         .executeMessage({
-          sender: user,
+          sender: relayer,
           args: [messageReceived],
           appReferences: [transceiverManagerAppId],
           boxReferences: [
