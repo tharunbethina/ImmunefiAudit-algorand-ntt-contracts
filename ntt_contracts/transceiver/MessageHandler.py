@@ -14,9 +14,11 @@ class ThresholdUpdated(Struct):
 class MessageHandler(ARC4Contract, ABC):
     """The MessageHandler is an abstract contract to inherit from to gain functionality for cross-chain communication.
 
-    The abstract smart contract provides the common implementation to execute a message. The concrete MessageHandler
-    must implement the subroutine `_handle_message`. It is also able to decide the threshold required for attestations
-    before a must is allowed to be executed.
+    The abstract smart contract provides the common implementation to execute a message.
+
+    The concrete MessageHandler should call `_set_transceiver_manager` and must implement the subroutine
+    `_handle_message`. It is also able to decide the threshold required for attestations before a message is allowed to
+    be executed.
     """
     def __init__(self) -> None:
         self.transceiver_manager = GlobalState(UInt64)
@@ -24,8 +26,7 @@ class MessageHandler(ARC4Contract, ABC):
         self.messages_executed = BoxMap(Bytes32, Bool, key_prefix=b"messages_executed_")
 
     @abimethod(create="require")
-    def create(self, admin_in_transceiver_manager: Address, transceiver_manager: UInt64, threshold: UInt64) -> None:
-        self._set_transceiver_manager(admin_in_transceiver_manager, transceiver_manager)
+    def create(self, threshold: UInt64) -> None:
         self._set_threshold(threshold)
 
     @abimethod

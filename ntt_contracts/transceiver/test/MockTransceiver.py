@@ -1,4 +1,4 @@
-from algopy import Bytes, GlobalState, UInt64, subroutine
+from algopy import Bytes, GlobalState, String, UInt64, subroutine
 from algopy.arc4 import DynamicBytes, Struct, abimethod, emit
 
 from ...types import ARC4UInt64, Bytes32, MessageToSend, MessageReceived
@@ -34,6 +34,10 @@ class MockTransceiver(Transceiver):
     ) -> None:
         Transceiver.create(self, transceiver_manager, min_upgrade_delay)
         self.message_fee.value = message_fee
+
+    @abimethod(readonly=True)
+    def get_transceiver_type(self) -> String:
+        return String("mock")
 
     @abimethod
     def deliver_message(self, message: MessageReceived) -> None:

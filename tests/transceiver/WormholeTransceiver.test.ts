@@ -3,7 +3,6 @@ import type { TransactionSignerAccount } from "@algorandfoundation/algokit-utils
 import { keccak_256 } from "@noble/hashes/sha3";
 import { type Account, type Address, OnApplicationComplete, getApplicationAddress } from "algosdk";
 
-import { MockRelayerClient, MockRelayerFactory } from "../../specs/client/MockRelayer.client.ts";
 import {
   MockTransceiverManagerClient,
   MockTransceiverManagerFactory,
@@ -42,12 +41,6 @@ describe("WormholeTransceiver", () => {
 
   const WORMHOLE_CORE_MESSAGE_FEE = 500_000n;
   let wormholeCoreAppId: bigint;
-
-  const RELAYER_DEFAULT_GAS_LIMIT = 300_000n;
-  const RELAYER_NATIVE_FEE = (2).algo();
-  let relayerFactory: MockRelayerFactory;
-  let relayerClient: MockRelayerClient;
-  let relayerAppId: bigint;
 
   let factory: WormholeTransceiverFactory;
   let client: WormholeTransceiverClient;
@@ -97,28 +90,6 @@ describe("WormholeTransceiver", () => {
       expect(appState["MessageFee"].value).toEqual(WORMHOLE_CORE_MESSAGE_FEE);
     }
 
-    // deploy wormhole relayer
-    {
-      relayerFactory = algorand.client.getTypedAppFactory(MockRelayerFactory, {
-        defaultSender: creator,
-        defaultSigner: creator.signer,
-      });
-      const { appClient, result } = await relayerFactory.deploy({
-        createParams: {
-          sender: creator,
-          method: "create",
-          args: [0n, RELAYER_NATIVE_FEE.microAlgos, 0n],
-        },
-      });
-      relayerAppId = result.appId;
-      relayerClient = appClient;
-
-      expect(relayerAppId).not.toEqual(0n);
-      expect(await relayerClient.state.global.folksId()).toEqual(0n);
-      expect(await relayerClient.state.global.nativePriceQuote()).toEqual(RELAYER_NATIVE_FEE.microAlgos);
-      expect(await relayerClient.state.global.tokenPriceQuote()).toEqual(0n);
-    }
-
     // fund mock transceiver manager so have funds to pay for sending messages
     await localnet.algorand.account.ensureFunded(
       getApplicationAddress(transceiverManagerAppId),
@@ -132,7 +103,7 @@ describe("WormholeTransceiver", () => {
       createParams: {
         sender: creator,
         method: "create",
-        args: [transceiverManagerAppId, wormholeCoreAppId, SOURCE_CHAIN_ID, true, relayerAppId, MIN_UPGRADE_DELAY],
+        args: [transceiverManagerAppId, wormholeCoreAppId, SOURCE_CHAIN_ID, MIN_UPGRADE_DELAY],
         appReferences: [wormholeCoreAppId],
       },
     });
@@ -155,9 +126,6 @@ describe("WormholeTransceiver", () => {
     expect(await client.state.global.wormholeCore()).toEqual(wormholeCoreAppId);
     expect(await client.state.global.chainId()).toEqual(SOURCE_CHAIN_ID);
     expect(await client.state.global.emitterLsig()).toEqual(emitterLogicSig.toString());
-    expect(await client.state.global.isWormholeRelayingEnabled()).toBeTruthy();
-    expect(await client.state.global.wormholeRelayer()).toEqual(relayerAppId);
-    expect(await client.state.global.relayerDefaultGasLimit()).toBeUndefined();
 
     expect(Uint8Array.from(await client.defaultAdminRole())).toEqual(DEFAULT_ADMIN_ROLE);
     expect(Uint8Array.from(await client.getRoleAdmin({ args: [DEFAULT_ADMIN_ROLE] }))).toEqual(DEFAULT_ADMIN_ROLE);
@@ -168,24 +136,6 @@ describe("WormholeTransceiver", () => {
   });
 
   describe("when uninitialised", () => {
-    test("fails to set wormhole relayer", async () => {
-      await expect(client.send.setWormholeRelayer({ sender: user, args: [0] })).rejects.toThrow(
-        "Uninitialised contract",
-      );
-    });
-
-    test("fails to set is wormhole relayer enabled", async () => {
-      await expect(client.send.setIsWormholeRelayingEnabled({ sender: user, args: [false] })).rejects.toThrow(
-        "Uninitialised contract",
-      );
-    });
-
-    test("fails to set relayer default gas limit", async () => {
-      await expect(
-        client.send.setRelayerDefaultGasLimit({ sender: user, args: [RELAYER_DEFAULT_GAS_LIMIT] }),
-      ).rejects.toThrow("Uninitialised contract");
-    });
-
     test("fails to set wormhole peer", async () => {
       await expect(client.send.setWormholePeer({ sender: user, args: [5, getRandomBytes(32)] })).rejects.toThrow(
         "Uninitialised contract",
@@ -204,15 +154,6 @@ describe("WormholeTransceiver", () => {
       });
       await expect(
         client.send.receiveMessage({ sender: user, args: [verifyVAATxn], appReferences: [transceiverManagerAppId] }),
-      ).rejects.toThrow("Uninitialised contract");
-    });
-
-    test("fails to receive message from relayer", async () => {
-      await expect(
-        client.send.receiveWormholeMessage({
-          sender: user,
-          args: [getRandomBytes(100), getRandomUInt(MAX_UINT16), getRandomBytes(32), getRandomBytes(32)],
-        }),
       ).rejects.toThrow("Uninitialised contract");
     });
 
@@ -247,84 +188,9 @@ describe("WormholeTransceiver", () => {
     await expect(client.getWormholePeer({ args: [PEER_CHAIN_ID] })).rejects.toThrow("Unknown peer chain");
   });
 
-  describe("set wormhole relayer", () => {
-    test("fails when caller is not manager", async () => {
-      await expect(
-        client.send.setWormholeRelayer({
-          sender: user,
-          args: [0n],
-          boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, user.publicKey)],
-        }),
-      ).rejects.toThrow("Access control unauthorised account");
-    });
-
-    test("succeeds", async () => {
-      const tempRelayerAppId = getRandomUInt(1e6);
-      await client.send.setWormholeRelayer({
-        sender: admin,
-        args: [tempRelayerAppId],
-        boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
-      });
-      expect(await client.state.global.wormholeRelayer()).toEqual(tempRelayerAppId);
-
-      // restore
-      await client.send.setWormholeRelayer({
-        sender: admin,
-        args: [relayerAppId],
-        boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
-      });
-      expect(await client.state.global.wormholeRelayer()).toEqual(relayerAppId);
-    });
-  });
-
-  describe("set is wormhole relaying enabled", () => {
-    test("fails when caller is not manager", async () => {
-      await expect(
-        client.send.setIsWormholeRelayingEnabled({
-          sender: user,
-          args: [false],
-          boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, user.publicKey)],
-        }),
-      ).rejects.toThrow("Access control unauthorised account");
-    });
-
-    test("succeeds", async () => {
-      await client.send.setIsWormholeRelayingEnabled({
-        sender: admin,
-        args: [false],
-        boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
-      });
-      expect(await client.state.global.isWormholeRelayingEnabled()).toBeFalsy();
-
-      // restore
-      await client.send.setIsWormholeRelayingEnabled({
-        sender: admin,
-        args: [true],
-        boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
-      });
-      expect(await client.state.global.isWormholeRelayingEnabled()).toBeTruthy();
-    });
-  });
-
-  describe("set relayer default gas limit", () => {
-    test("fails when caller is not manager", async () => {
-      await expect(
-        client.send.setRelayerDefaultGasLimit({
-          sender: user,
-          args: [RELAYER_DEFAULT_GAS_LIMIT],
-          boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, user.publicKey)],
-        }),
-      ).rejects.toThrow("Access control unauthorised account");
-    });
-
-    test("succeeds", async () => {
-      await client.send.setRelayerDefaultGasLimit({
-        sender: admin,
-        args: [RELAYER_DEFAULT_GAS_LIMIT],
-        boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
-      });
-      expect(await client.state.global.relayerDefaultGasLimit()).toEqual(RELAYER_DEFAULT_GAS_LIMIT);
-    });
+  test("get transceiver type returns wormhole", async () => {
+    const transceiverType = await client.getTransceiverType();
+    expect(transceiverType).toEqual("wormhole");
   });
 
   describe("set wormhole peer", () => {
@@ -408,46 +274,6 @@ describe("WormholeTransceiver", () => {
       ).rejects.toThrow("Unknown peer chain");
     });
 
-    test("fails for automatic relayer when disabled", async () => {
-      const message = getRandomMessageToSend({ destinationChainId: Number(PEER_CHAIN_ID) });
-      const instruction = convertBooleanToByte(false);
-      await expect(
-        client
-          .newGroup()
-          .setIsWormholeRelayingEnabled({
-            sender: admin,
-            args: [false],
-            boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
-          })
-          .quoteDeliveryPrice({
-            sender: user,
-            args: [message, instruction],
-            appReferences: [appId, wormholeCoreAppId, relayerAppId],
-            boxReferences: [{ appId, name: getWormholePeersBoxKey(PEER_CHAIN_ID) }],
-          })
-          .send(),
-      ).rejects.toThrow("Wormhole relaying is not enabled");
-    });
-
-    test.each([
-      { name: "empty instruction", instruction: Uint8Array.from([]) },
-      { name: "non-empty instruction", instruction: convertBooleanToByte(false) },
-    ])("returns correct amount for automatic relaying when $name", async ({ instruction }) => {
-      const message = getRandomMessageToSend({ destinationChainId: Number(PEER_CHAIN_ID) });
-      const res = await client.send.quoteDeliveryPrice({
-        sender: user,
-        args: [message, instruction],
-        appReferences: [appId, wormholeCoreAppId, relayerAppId],
-        boxReferences: [{ appId, name: getWormholePeersBoxKey(PEER_CHAIN_ID) }],
-        extraFee: (1000).microAlgos(),
-      });
-      expect(res.confirmations[0].innerTxns!.length).toEqual(1);
-      expect(res.confirmations[0].innerTxns![0].logs![0]).toEqual(
-        getEventBytes("QuoteDeliveryPrice(uint16,uint256,uint256)", [PEER_CHAIN_ID, 0n, RELAYER_DEFAULT_GAS_LIMIT]),
-      );
-      expect(res.return).toEqual(WORMHOLE_CORE_MESSAGE_FEE + RELAYER_NATIVE_FEE.microAlgos);
-    });
-
     test("returns correct amount for manual relaying", async () => {
       const message = getRandomMessageToSend({ destinationChainId: Number(PEER_CHAIN_ID) });
       const instruction = convertBooleanToByte(true);
@@ -502,81 +328,10 @@ describe("WormholeTransceiver", () => {
       ).rejects.toThrow("0,1: Unknown peer chain");
     });
 
-    test("fails for automatic relayer when disabled", async () => {
-      const message = getRandomMessageToSend({ destinationChainId: Number(PEER_CHAIN_ID) });
-      const instruction = convertBooleanToByte(false);
-      const emitterLsig = await client.state.global.emitterLsig();
-
-      const {
-        transactions: [disableTxn],
-      } = await client.createTransaction.setIsWormholeRelayingEnabled({
-        sender: admin,
-        args: [false],
-        boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey)],
-      });
-      await expect(
-        transceiverManagerClient
-          .newGroup()
-          .addTransaction(disableTxn)
-          .sendMessage({
-            sender: user,
-            args: [appId, WORMHOLE_CORE_MESSAGE_FEE + RELAYER_NATIVE_FEE.microAlgos, message, instruction],
-            accountReferences: [emitterLsig!],
-            appReferences: [appId, wormholeCoreAppId, relayerAppId],
-            boxReferences: [{ appId, name: getWormholePeersBoxKey(PEER_CHAIN_ID) }],
-            extraFee: (7000).microAlgos(),
-          })
-          .send(),
-      ).rejects.toThrow("Wormhole relaying is not enabled");
-    });
-
-    test.each([
-      { name: "empty instruction", instruction: Uint8Array.from([]), sequence: 1n },
-      { name: "non-empty instruction", instruction: convertBooleanToByte(false), sequence: 2n },
-    ])("succeeds and publishes message with automatic relaying when $name", async ({ instruction, sequence }) => {
-      const message = getRandomMessageToSend({ destinationChainId: Number(PEER_CHAIN_ID) });
-      const emitterLsig = await client.state.global.emitterLsig();
-
-      const res = await transceiverManagerClient.send.sendMessage({
-        sender: user,
-        args: [appId, WORMHOLE_CORE_MESSAGE_FEE + RELAYER_NATIVE_FEE.microAlgos, message, instruction],
-        accountReferences: [emitterLsig!],
-        appReferences: [appId, wormholeCoreAppId, relayerAppId],
-        boxReferences: [{ appId, name: getWormholePeersBoxKey(PEER_CHAIN_ID) }],
-        extraFee: (7000).microAlgos(),
-      });
-      expect(res.confirmations[0].innerTxns!.length).toEqual(2);
-      expect(res.confirmations[0].innerTxns![1].logs![0]).toEqual(getEventBytes("MessageSent(byte[32])", message.id));
-      expect(res.confirmations[0].innerTxns![1].innerTxns!.length).toEqual(5);
-      expect(res.confirmations[0].innerTxns![1].innerTxns![0].logs![0]).toEqual(
-        getEventBytes("QuoteDeliveryPrice(uint16,uint256,uint256)", [PEER_CHAIN_ID, 0n, RELAYER_DEFAULT_GAS_LIMIT]),
-      );
-      expect(res.confirmations[0].innerTxns![1].innerTxns![2].logs![0]).toEqual(
-        getEventBytes("MessagePublished(byte[],uint64,uint64)", [encodeMessageToSend(message), 0, sequence]),
-      );
-      expect(res.confirmations[0].innerTxns![1].innerTxns![4].logs![0]).toEqual(
-        getEventBytes("RequestDelivery(address,uint64,uint16,byte[32],uint256,uint256,uint64,bool)", [
-          getApplicationAddress(appId),
-          sequence,
-          PEER_CHAIN_ID,
-          PEER_CONTRACT_ADDRESS,
-          0n,
-          RELAYER_DEFAULT_GAS_LIMIT,
-          RELAYER_NATIVE_FEE.microAlgos,
-          true,
-        ]),
-      );
-
-      const appState = await localnet.algorand.app.getLocalState(wormholeCoreAppId, emitterLsig!);
-      const bytes = convertNumberToBytes(0, 127);
-      bytes.set(convertNumberToBytes(sequence, 8), 0);
-      expect((appState["\x00"] as any).valueRaw).toEqual(bytes);
-    });
-
     test("succeeds and publishes message with manual relaying", async () => {
       const message = getRandomMessageToSend({ destinationChainId: Number(PEER_CHAIN_ID) });
       const instruction = convertBooleanToByte(true);
-      const sequence = 3n;
+      const sequence = 1n;
       const emitterLsig = await client.state.global.emitterLsig();
 
       const res = await transceiverManagerClient.send.sendMessage({
@@ -882,74 +637,6 @@ describe("WormholeTransceiver", () => {
           }),
         ).rejects.toThrow("VAA already seen");
       });
-    });
-
-    describe("relayer", () => {
-      test("fails when caller is not relayer", async () => {
-        await expect(
-          client.send.receiveWormholeMessage({
-            sender: user,
-            args: [getRandomBytes(100), getRandomUInt(MAX_UINT16), getRandomBytes(32), getRandomBytes(32)],
-            appReferences: [relayerAppId],
-            boxReferences: [getRoleBoxKey(MANAGER_ROLE), getAddressRolesBoxKey(MANAGER_ROLE, user.publicKey)],
-          }),
-        ).rejects.toThrow("Caller must be relayer");
-      });
-
-      test("succeeds and delivers message to transceiver manager", async () => {
-        const APP_MIN_BALANCE = (21_300).microAlgos();
-        const sequence = getRandomUInt(1000);
-        const message = getRandomMessageToSend({ destinationChainId: Number(SOURCE_CHAIN_ID) });
-        const { vaaDigest } = getWormholeVAA(
-          PEER_CHAIN_ID,
-          PEER_CONTRACT_ADDRESS,
-          sequence,
-          encodeMessageToSend(message),
-        );
-
-        const fundingTxn = await localnet.algorand.createTransaction.payment({
-          sender: creator,
-          receiver: getApplicationAddress(appId),
-          amount: APP_MIN_BALANCE,
-        });
-        const res = await relayerClient
-          .newGroup()
-          .addTransaction(fundingTxn)
-          .deliverMessage({
-            sender: user,
-            args: [encodeMessageToSend(message), PEER_CHAIN_ID, PEER_CONTRACT_ADDRESS, vaaDigest, appId],
-            appReferences: [appId, transceiverManagerAppId],
-            boxReferences: [getWormholePeersBoxKey(PEER_CHAIN_ID), getVAAsConsumedBoxKey(vaaDigest)],
-            extraFee: (2000).microAlgos(),
-          })
-          .send();
-
-        expect(res.confirmations[1].innerTxns!.length).toEqual(1);
-        expect(res.confirmations[1].innerTxns![0].logs).toBeDefined();
-        expect(res.confirmations[1].innerTxns![0].logs![0]).toEqual(
-          getEventBytes("ReceivedMessage(byte[32],byte[32])", [vaaDigest, message.id]),
-        );
-        expect(res.confirmations[1].innerTxns![0].innerTxns!.length).toEqual(1);
-        expect(res.confirmations[1].innerTxns![0].innerTxns![0].txn.txn.type).toEqual("appl");
-        expect(res.confirmations[1].innerTxns![0].innerTxns![0].txn.txn.applicationCall!.appIndex).toEqual(
-          transceiverManagerAppId,
-        );
-        expect(res.confirmations[1].innerTxns![0].innerTxns![0].logs![0]).toEqual(
-          getEventBytes("AttestationReceived(byte[32],uint16,byte[32],uint64,byte[32],uint64)", [
-            message.id,
-            PEER_CHAIN_ID,
-            message.sourceAddress,
-            convertBytesToNumber(message.handlerAddress),
-            MESSAGE_DIGEST,
-            1,
-          ]),
-        );
-
-        const isConsumed = await client.state.box.vaasConsumed.value(vaaDigest);
-        expect(isConsumed).toBeTruthy();
-      });
-
-      // other behavior is already tested in "manual"
     });
   });
 });

@@ -31,6 +31,9 @@ class NttManagerPeer(Struct):
 
 
 # Events
+class Paused(Struct):
+    is_paused: Bool
+
 class TransceiverManagerUpdated(Struct):
     transceiver_manager: ARC4UInt64
 
@@ -54,6 +57,8 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         NttRateLimiter.__init__(self)
         Upgradeable.__init__(self)
 
+        self.is_paused = False
+
         # token
         self.asset_id = GlobalState(UInt64)
         self.ntt_token = GlobalState(UInt64)
@@ -66,16 +71,8 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         self.ntt_manager_peers = BoxMap(UInt16, NttManagerPeer, key_prefix=b"ntt_manager_peer_")
 
     @abimethod(create="require")
-    def create( # type: ignore[override]
-        self,
-        ntt_token: UInt64,
-        chain_id: UInt64,
-        admin_in_transceiver_manager: Address,
-        transceiver_manager: UInt64,
-        threshold: UInt64,
-        min_upgrade_delay: UInt64
-    ) -> None:
-        MessageHandler.create(self, admin_in_transceiver_manager, transceiver_manager, threshold)
+    def create(self, ntt_token: UInt64, chain_id: UInt64, threshold: UInt64, min_upgrade_delay: UInt64) -> None: # type: ignore[override]
+        MessageHandler.create(self, threshold)
         Upgradeable.create(self, min_upgrade_delay)
 
         # token
@@ -87,13 +84,24 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         self.chain_id.value = chain_id
 
     @abimethod
-    def initialise(self, admin: Address) -> None: # type: ignore[override]
+    def initialise(self, admin: Address, transceiver_manager: UInt64) -> None: # type: ignore[override]
         # check caller is contract creator, create outbound bucket and grant roles: default admin, rate limiter manager
         NttRateLimiter.initialise(self, admin)
         # not calling Upgradeable.initialise as already initialised
 
+        self._set_transceiver_manager(admin, transceiver_manager)
+
         self._grant_role(self.upgradable_admin_role(), admin)
         self._grant_role(self.ntt_manager_admin_role(), admin)
+
+    @abimethod
+    def pause(self, is_paused: Bool) -> None:
+        self._only_initialised()
+        self._check_sender_role(self.pauser_role())
+
+        # set whether paused or not
+        self.is_paused = is_paused.native
+        emit(Paused(is_paused))
 
     @abimethod
     def set_transceiver_manager(self, admin_in_transceiver_manager: Address, transceiver_manager: UInt64) -> None:
@@ -172,6 +180,9 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
 
     @abimethod
     def complete_outbound_queued_transfer(self, fee_payment: gtxn.PaymentTransaction, message_id: Bytes32) -> Bytes32:
+        self._only_initialised()
+        self._is_not_paused()
+
         # find the message in the queue and ensure that sufficient time has elapsed
         can_complete, outbound_queued_transfer = self.get_outbound_queued_transfer(message_id)
         assert can_complete, "Outbound queued transfer is still queued"
@@ -197,6 +208,9 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
 
     @abimethod
     def cancel_outbound_queued_transfer(self, message_id: Bytes32) -> None:
+        self._only_initialised()
+        self._is_not_paused()
+
         # find the message in the queue
         outbound_queued_transfer = self.get_outbound_queued_transfer(message_id)[1]
 
@@ -215,6 +229,9 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
 
     @abimethod
     def complete_inbound_queued_transfer(self, message_digest: Bytes32) -> None:
+        self._only_initialised()
+        self._is_not_paused()
+
         # find the message in the queue and ensure that sufficient time has elapsed
         can_complete, inbound_queued_transfer = self.get_inbound_queued_transfer(message_digest)
         assert can_complete, "Inbound queued transfer is still queued"
@@ -234,9 +251,17 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         return Bytes16.from_bytes(op.extract(op.keccak256(b"NTT_MANAGER_ADMIN"), 0, 16))
 
     @abimethod(readonly=True)
+    def pauser_role(self) -> Bytes16:
+        return Bytes16.from_bytes(op.extract(op.keccak256(b"PAUSER"), 0, 16))
+
+    @abimethod(readonly=True)
     def get_ntt_manager_peer(self, chain_id: UInt16) -> NttManagerPeer:
         assert chain_id in self.ntt_manager_peers, "Unknown chain"
         return self.ntt_manager_peers[chain_id]
+
+    @subroutine
+    def _is_not_paused(self) -> None:
+        assert not self.is_paused, "Contract is paused"
 
     @subroutine
     def _use_message_id(self) -> Bytes32:
@@ -255,6 +280,7 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         transceiver_instructions: TransceiverInstructions,
     ) -> Bytes32:
         self._only_initialised()
+        self._is_not_paused()
 
         # check payment - amount is checked in _transfer subroutine
         assert fee_payment.receiver == Global.current_application_address, "Unknown fee payment receiver"
@@ -357,6 +383,9 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
 
     @subroutine
     def _handle_message(self, message_digest: Bytes32, message: MessageReceived) -> None:
+        self._only_initialised()
+        self._is_not_paused()
+
         # verify peer
         ntt_manager_peer = self.get_ntt_manager_peer(message.source_chain_id)
         assert message.source_address == ntt_manager_peer.peer_contract, "Peer address mismatch"
