@@ -43,6 +43,7 @@ describe("NttManager", () => {
   const RATE_LIMITER_MANAGER_ROLE = getRoleBytes("RATE_LIMITER_MANAGER");
   const UPGRADEABLE_ADMIN_ROLE = getRoleBytes("UPGRADEABLE_ADMIN");
   const NTT_MANAGER_ADMIN_ROLE = getRoleBytes("NTT_MANAGER_ADMIN");
+  const PAUSER_ROLE = getRoleBytes("PAUSER");
 
   const MIN_UPGRADE_DELAY = SECONDS_IN_DAY;
 
@@ -86,6 +87,7 @@ describe("NttManager", () => {
 
   let creator: Address & Account & TransactionSignerAccount;
   let admin: Address & Account & TransactionSignerAccount;
+  let pauser: Address & Account & TransactionSignerAccount;
   let user: Address & Account & TransactionSignerAccount;
   let relayer: Address & Account & TransactionSignerAccount;
 
@@ -95,6 +97,7 @@ describe("NttManager", () => {
 
     creator = await generateAccount({ initialFunds: (100).algo() });
     admin = await generateAccount({ initialFunds: (100).algo() });
+    pauser = await generateAccount({ initialFunds: (100).algo() });
     user = await generateAccount({ initialFunds: (100).algo() });
     relayer = await generateAccount({ initialFunds: (100).algo() });
 
@@ -207,8 +210,8 @@ describe("NttManager", () => {
       createParams: {
         sender: creator,
         method: "create",
-        args: [nttTokenAppId, SOURCE_CHAIN_ID, admin.toString(), transceiverManagerAppId, THRESHOLD, MIN_UPGRADE_DELAY],
-        extraFee: (2000).microAlgos(),
+        args: [nttTokenAppId, SOURCE_CHAIN_ID, THRESHOLD, MIN_UPGRADE_DELAY],
+        extraFee: (1000).microAlgos(),
       },
     });
     appId = result.appId;
@@ -224,8 +227,9 @@ describe("NttManager", () => {
     expect(await client.getActiveMinUpgradeDelay()).toEqual(MIN_UPGRADE_DELAY);
     expect(await client.state.global.scheduledContractUpgrade()).toBeUndefined();
     expect(await client.state.global.version()).toEqual(1n);
-    expect(await client.state.global.transceiverManager()).toEqual(transceiverManagerAppId);
+    expect(await client.state.global.transceiverManager()).toEqual(undefined);
     expect(await client.state.global.threshold()).toEqual(THRESHOLD);
+    expect(await client.state.global.isPaused()).toBeFalsy();
     expect(await client.state.global.assetId()).toEqual(assetId);
     expect(await client.state.global.nttToken()).toEqual(nttTokenAppId);
     expect(await client.state.global.messageSequence()).toEqual(0n);
@@ -241,11 +245,10 @@ describe("NttManager", () => {
     expect(Uint8Array.from(await client.getRoleAdmin({ args: [UPGRADEABLE_ADMIN_ROLE] }))).toEqual(DEFAULT_ADMIN_ROLE);
     expect(Uint8Array.from(await client.nttManagerAdminRole())).toEqual(NTT_MANAGER_ADMIN_ROLE);
     expect(Uint8Array.from(await client.getRoleAdmin({ args: [NTT_MANAGER_ADMIN_ROLE] }))).toEqual(DEFAULT_ADMIN_ROLE);
+    expect(Uint8Array.from(await client.pauserRole())).toEqual(PAUSER_ROLE);
+    expect(Uint8Array.from(await client.getRoleAdmin({ args: [PAUSER_ROLE] }))).toEqual(DEFAULT_ADMIN_ROLE);
 
-    expect((result as any).confirmations[0].innerTxns!.length).toEqual(2);
-    expect((result as any).confirmations[0].innerTxns![0].logs![0]).toEqual(
-      getEventBytes("MessageHandlerAdded(uint64,address)", [appId, admin.toString()]),
-    );
+    expect((result as any).confirmations[0].innerTxns!.length).toEqual(1);
   });
 
   test("get ntt manager peer fails if chain unknown", async () => {
@@ -279,6 +282,15 @@ describe("NttManager", () => {
         ],
       });
       expect(await client.getRateDuration({ args: [bucketId] })).toEqual(OUTBOUND_DURATION);
+    });
+
+    test("fails to pause", async () => {
+      await expect(
+        client.send.pause({
+          sender: admin,
+          args: [true],
+        }),
+      ).rejects.toThrow("Uninitialised contract");
     });
 
     test("fails to set transceiver manager", async () => {
@@ -343,6 +355,38 @@ describe("NttManager", () => {
       ).rejects.toThrow("Uninitialised contract");
     });
 
+    test("fails to complete outbound queued transfer", async () => {
+      const feePaymentTxn = await localnet.algorand.createTransaction.payment({
+        sender: user,
+        receiver: getApplicationAddress(appId),
+        amount: (0).microAlgo(),
+      });
+      await expect(
+        client.send.completeOutboundQueuedTransfer({
+          sender: user,
+          args: [feePaymentTxn, getRandomBytes(32)],
+        }),
+      ).rejects.toThrow("Uninitialised contract");
+    });
+
+    test("fails to cancel outbound queued transfer", async () => {
+      await expect(
+        client.send.cancelOutboundQueuedTransfer({
+          sender: user,
+          args: [getRandomBytes(32)],
+        }),
+      ).rejects.toThrow("Uninitialised contract");
+    });
+
+    test("fails to complete inbound queued transfer", async () => {
+      await expect(
+        client.send.completeInboundQueuedTransfer({
+          sender: user,
+          args: [getRandomBytes(32)],
+        }),
+      ).rejects.toThrow("Uninitialised contract");
+    });
+
     test("succeeds to initialise and sets correct state", async () => {
       const APP_MIN_BALANCE = (265_700).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
@@ -365,7 +409,8 @@ describe("NttManager", () => {
         .addTransaction(opUpTxn)
         .addTransaction(fundingTxn)
         .initialise({
-          args: [admin.toString()],
+          args: [admin.toString(), transceiverManagerAppId],
+          appReferences: [transceiverManagerAppId],
           boxReferences: [
             getRoleBoxKey(DEFAULT_ADMIN_ROLE),
             getAddressRolesBoxKey(DEFAULT_ADMIN_ROLE, admin.publicKey),
@@ -373,10 +418,13 @@ describe("NttManager", () => {
             getAddressRolesBoxKey(RATE_LIMITER_MANAGER_ROLE, admin.publicKey),
             getBucketBoxKey(bucketId),
           ],
+          extraFee: (1000).microAlgos(),
         })
         .send();
 
       expect(await client.state.global.isInitialised()).toBeTruthy();
+      expect(await client.state.global.transceiverManager()).toEqual(transceiverManagerAppId);
+
       expect(await client.hasRole({ args: [DEFAULT_ADMIN_ROLE, admin.toString()] })).toBeTruthy();
       expect(await client.hasRole({ args: [RATE_LIMITER_MANAGER_ROLE, admin.toString()] })).toBeTruthy();
       expect(await client.hasRole({ args: [UPGRADEABLE_ADMIN_ROLE, admin.toString()] })).toBeTruthy();
@@ -385,7 +433,162 @@ describe("NttManager", () => {
       expect(res.confirmations[2].logs![0]).toEqual(
         getEventBytes("BucketAdded(byte[32],uint256,uint64)", [bucketId, 0n, 0n]),
       );
+
+      expect(res.confirmations[2].innerTxns!.length).toEqual(1);
+      expect(res.confirmations[2].innerTxns![0].logs![0]).toEqual(
+        getEventBytes("MessageHandlerAdded(uint64,address)", [appId, admin.toString()]),
+      );
     });
+  });
+
+  describe("pause", () => {
+    beforeAll(async () => {
+      const APP_MIN_BALANCE = (27_700).microAlgos();
+      const fundingTxn = await localnet.algorand.createTransaction.payment({
+        sender: creator,
+        receiver: getApplicationAddress(appId),
+        amount: APP_MIN_BALANCE,
+      });
+      await client
+        .newGroup()
+        .addTransaction(fundingTxn)
+        .grantRole({
+          sender: admin,
+          args: [PAUSER_ROLE, pauser.toString()],
+          boxReferences: [
+            getRoleBoxKey(PAUSER_ROLE),
+            getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey),
+            getAddressRolesBoxKey(DEFAULT_ADMIN_ROLE, admin.publicKey),
+          ],
+        })
+        .send();
+      expect(await client.hasRole({ args: [PAUSER_ROLE, pauser.toString()] })).toBeTruthy();
+    });
+
+    test("fails when caller is not pauser", async () => {
+      await expect(
+        client.send.pause({
+          sender: user,
+          args: [true],
+          boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, user.publicKey)],
+        }),
+      ).rejects.toThrow("Access control unauthorised account");
+    });
+
+    test("succeeds", async () => {
+      const newThreshold = 1n;
+      expect(newThreshold).not.toEqual(THRESHOLD);
+
+      // pause
+      let res = await client.send.pause({
+        sender: pauser,
+        args: [true],
+        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+      });
+      expect(await client.state.global.isPaused()).toBeTruthy();
+      expect(res.confirmations[0].logs![0]).toEqual(getEventBytes("Paused(bool)", [true]));
+
+      // unpause
+      res = await client.send.pause({
+        sender: pauser,
+        args: [false],
+        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+      });
+      expect(await client.state.global.isPaused()).toBeFalsy();
+      expect(res.confirmations[0].logs![0]).toEqual(getEventBytes("Paused(bool)", [false]));
+    });
+  });
+
+  describe("when paused", () => {
+    beforeAll(async () => {
+      await client.send.pause({
+        sender: pauser,
+        args: [true],
+        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+      });
+    });
+
+    afterAll(async () => {
+      await client.send.pause({
+        sender: pauser,
+        args: [false],
+        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+      });
+    });
+
+    test("fails to transfer (simple)", async () => {
+      const feePaymentTxn = await localnet.algorand.createTransaction.payment({
+        sender: user,
+        receiver: getApplicationAddress(appId),
+        amount: (0).microAlgo(),
+      });
+      const sendTokenTxn = await localnet.algorand.createTransaction.assetTransfer({
+        sender: user,
+        receiver: getApplicationAddress(nttTokenAppId),
+        assetId,
+        amount: 0n,
+      });
+      await expect(
+        client.send.transfer({
+          sender: user,
+          args: [feePaymentTxn, sendTokenTxn, 0n, PEER_CHAIN_ID, getRandomBytes(32)],
+        }),
+      ).rejects.toThrow("Contract is paused");
+    });
+
+    test("fails to transfer (full)", async () => {
+      const feePaymentTxn = await localnet.algorand.createTransaction.payment({
+        sender: user,
+        receiver: getApplicationAddress(appId),
+        amount: (0).microAlgo(),
+      });
+      const sendTokenTxn = await localnet.algorand.createTransaction.assetTransfer({
+        sender: user,
+        receiver: getApplicationAddress(nttTokenAppId),
+        assetId,
+        amount: 0n,
+      });
+      await expect(
+        client.send.transferFull({
+          sender: user,
+          args: [feePaymentTxn, sendTokenTxn, 0n, PEER_CHAIN_ID, getRandomBytes(32), false, []],
+        }),
+      ).rejects.toThrow("Contract is paused");
+    });
+
+    test("fails to complete outbound queued transfer", async () => {
+      const feePaymentTxn = await localnet.algorand.createTransaction.payment({
+        sender: user,
+        receiver: getApplicationAddress(appId),
+        amount: (0).microAlgo(),
+      });
+      await expect(
+        client.send.completeOutboundQueuedTransfer({
+          sender: user,
+          args: [feePaymentTxn, getRandomBytes(32)],
+        }),
+      ).rejects.toThrow("Contract is paused");
+    });
+
+    test("fails to cancel outbound queued transfer", async () => {
+      await expect(
+        client.send.cancelOutboundQueuedTransfer({
+          sender: user,
+          args: [getRandomBytes(32)],
+        }),
+      ).rejects.toThrow("Contract is paused");
+    });
+
+    test("fails to complete inbound queued transfer", async () => {
+      await expect(
+        client.send.completeInboundQueuedTransfer({
+          sender: user,
+          args: [getRandomBytes(32)],
+        }),
+      ).rejects.toThrow("Contract is paused");
+    });
+
+    // handle message when paused tested later
   });
 
   describe("set transceiver manager", () => {
@@ -2173,6 +2376,49 @@ describe("NttManager", () => {
           extraFee: (2000).microAlgos(),
         }),
       ).rejects.toThrow("Invalid target chain");
+    });
+
+    test("fails when paused", async () => {
+      const amount = 0n;
+
+      // pause
+      await client.send.pause({
+        sender: pauser,
+        args: [true],
+        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+      });
+
+      // prepare message
+      const messageReceived = getMessageReceived(
+        PEER_CHAIN_ID,
+        getRandomMessageToSend({
+          sourceAddress: PEER_CONTRACT,
+          destinationChainId: Number(SOURCE_CHAIN_ID),
+          handlerAddress: getApplicationAddress(appId).publicKey,
+          payload: getNttPayload(PEER_DECIMALS, amount, getRandomBytes(32), user.publicKey, SOURCE_CHAIN_ID),
+        }),
+      );
+
+      const messageDigest = calculateMessageDigest(messageReceived);
+      await transceiverManagerClient.send.setMessageDigest({ args: [messageDigest] });
+
+      // execute message
+      await expect(
+        client.send.executeMessage({
+          sender: relayer,
+          args: [messageReceived],
+          appReferences: [transceiverManagerAppId],
+          boxReferences: [getMessagesExecutedBoxKey(messageDigest)],
+          extraFee: (2000).microAlgos(),
+        }),
+      ).rejects.toThrow("Contract is paused");
+
+      // unpause
+      await client.send.pause({
+        sender: pauser,
+        args: [false],
+        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+      });
     });
 
     test("succeeds when insufficient capacity", async () => {

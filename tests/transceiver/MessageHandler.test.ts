@@ -73,53 +73,33 @@ describe("MessageHandler", () => {
       createParams: {
         sender: creator,
         method: "create",
-        args: [admin.toString(), transceiverManagerAppId, THRESHOLD],
-        extraFee: (1000).microAlgos(),
+        args: [THRESHOLD],
       },
     });
     appId = result.appId;
     client = appClient;
 
     expect(appId).not.toEqual(0n);
-    expect(await client.state.global.transceiverManager()).toEqual(transceiverManagerAppId);
+    expect(await client.state.global.transceiverManager()).toEqual(undefined);
     expect(await client.state.global.threshold()).toEqual(THRESHOLD);
-
-    expect((result as any).confirmations[0].innerTxns!.length).toEqual(1);
-    expect((result as any).confirmations[0].innerTxns![0].logs![0]).toEqual(
-      getEventBytes("MessageHandlerAdded(uint64,address)", [appId, admin.toString()]),
-    );
   });
 
-  describe("set message handler", () => {
+  describe("set transceiver manager", () => {
     test("fails when trying to set zero threshold", async () => {
       await expect(client.send.setThreshold({ sender: user, args: [0] })).rejects.toThrow("Cannot set zero threshold");
     });
 
     test("succeeds", async () => {
-      // deploy another transceiver manager
-      const { result } = await transceiverManagerFactory.send.create.bare({ sender: creator });
-      const { appId: tempAppId } = result;
-      expect(tempAppId).not.toEqual(transceiverManagerAppId);
-
-      // set transceiver manager
       const res = await client.send.setTransceiverManager({
-        sender: user,
-        args: [user.toString(), tempAppId],
-        extraFee: (1000).microAlgos(),
-      });
-      expect(await client.state.global.transceiverManager()).toEqual(tempAppId);
-      expect(res.confirmations[0].innerTxns!.length).toEqual(1);
-      expect(res.confirmations[0].innerTxns![0].logs![0]).toEqual(
-        getEventBytes("MessageHandlerAdded(uint64,address)", [appId, user.toString()]),
-      );
-
-      // restore
-      await client.send.setTransceiverManager({
         sender: user,
         args: [user.toString(), transceiverManagerAppId],
         extraFee: (1000).microAlgos(),
       });
       expect(await client.state.global.transceiverManager()).toEqual(transceiverManagerAppId);
+      expect(res.confirmations[0].innerTxns!.length).toEqual(1);
+      expect(res.confirmations[0].innerTxns![0].logs![0]).toEqual(
+        getEventBytes("MessageHandlerAdded(uint64,address)", [appId, user.toString()]),
+      );
     });
   });
 

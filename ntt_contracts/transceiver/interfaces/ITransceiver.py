@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from algopy import ARC4Contract, Bytes, UInt64, gtxn
+from algopy import ARC4Contract, Bytes, String, UInt64, gtxn
 from algopy.arc4 import abimethod
 
 from ...types import MessageToSend
@@ -11,6 +11,16 @@ class ITransceiver(ARC4Contract, ABC):
     The interface for receiving messages is not enforced by this contract. Instead, inheriting contracts should
     implement their own receiving logic, based on the verification model and logic associated with message handling.
     """
+    @abstractmethod
+    @abimethod(readonly=True)
+    def get_transceiver_type(self) -> String:
+        """Returns the string type of the transceiver. E.g. "wormhole", "axelar", etc.
+
+        Returns:
+            The transceiver type
+        """
+        pass
+
     @abstractmethod
     @abimethod(readonly=True)
     def quote_delivery_price(self, message: MessageToSend, transceiver_instruction: Bytes) -> UInt64:
