@@ -16,18 +16,12 @@ from ..types import (
     MessageToSend,
     MessageReceived
 )
-from .interfaces.INttManager import INttManager
+from .interfaces.INttManager import INttManager, NttManagerPeer
 from .NttRateLimiter import NttRateLimiter
 
 
 # Constants
 NTT_PAYLOAD_PREFIX = "994E5454"
-
-
-# Structs
-class NttManagerPeer(Struct):
-    peer_contract: Bytes32
-    decimals: ARC4UInt8
 
 
 # Events

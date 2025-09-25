@@ -1,8 +1,14 @@
 from abc import ABC, abstractmethod
 from algopy import ARC4Contract, UInt64, gtxn
-from algopy.arc4 import Bool, UInt16, abimethod
+from algopy.arc4 import Bool, Struct,UInt16, abimethod
 
-from ...types import Bytes32, TransceiverInstructions
+from ...types import ARC4UInt8, Bytes32, TransceiverInstructions
+
+
+# Structs
+class NttManagerPeer(Struct):
+    peer_contract: Bytes32
+    decimals: ARC4UInt8
 
 
 class INttManager(ARC4Contract, ABC):
@@ -92,5 +98,18 @@ class INttManager(ARC4Contract, ABC):
 
         Args:
             message_digest: Unique identifier of the message received.
+        """
+        pass
+
+    @abstractmethod
+    @abimethod(readonly=True)
+    def get_ntt_manager_peer(self, chain_id: UInt16) -> NttManagerPeer:
+        """Returns registered peer contract for a given chain.
+
+        Args:
+            chain_id: The chain id to get the peer of.
+
+        Returns:
+            The ntt manager peer
         """
         pass
