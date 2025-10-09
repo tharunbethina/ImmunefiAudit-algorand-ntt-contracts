@@ -44,6 +44,7 @@ describe("NttManager", () => {
   const UPGRADEABLE_ADMIN_ROLE = getRoleBytes("UPGRADEABLE_ADMIN");
   const NTT_MANAGER_ADMIN_ROLE = getRoleBytes("NTT_MANAGER_ADMIN");
   const PAUSER_ROLE = getRoleBytes("PAUSER");
+  const UNPAUSER_ROLE = getRoleBytes("UNPAUSER");
 
   const MIN_UPGRADE_DELAY = SECONDS_IN_DAY;
 
@@ -88,6 +89,7 @@ describe("NttManager", () => {
   let creator: Address & Account & TransactionSignerAccount;
   let admin: Address & Account & TransactionSignerAccount;
   let pauser: Address & Account & TransactionSignerAccount;
+  let unpauser: Address & Account & TransactionSignerAccount;
   let user: Address & Account & TransactionSignerAccount;
   let relayer: Address & Account & TransactionSignerAccount;
 
@@ -98,6 +100,7 @@ describe("NttManager", () => {
     creator = await generateAccount({ initialFunds: (100).algo() });
     admin = await generateAccount({ initialFunds: (100).algo() });
     pauser = await generateAccount({ initialFunds: (100).algo() });
+    unpauser = await generateAccount({ initialFunds: (100).algo() });
     user = await generateAccount({ initialFunds: (100).algo() });
     relayer = await generateAccount({ initialFunds: (100).algo() });
 
@@ -247,6 +250,8 @@ describe("NttManager", () => {
     expect(Uint8Array.from(await client.getRoleAdmin({ args: [NTT_MANAGER_ADMIN_ROLE] }))).toEqual(DEFAULT_ADMIN_ROLE);
     expect(Uint8Array.from(await client.pauserRole())).toEqual(PAUSER_ROLE);
     expect(Uint8Array.from(await client.getRoleAdmin({ args: [PAUSER_ROLE] }))).toEqual(DEFAULT_ADMIN_ROLE);
+    expect(Uint8Array.from(await client.unpauserRole())).toEqual(UNPAUSER_ROLE);
+    expect(Uint8Array.from(await client.getRoleAdmin({ args: [UNPAUSER_ROLE] }))).toEqual(DEFAULT_ADMIN_ROLE);
 
     expect((result as any).confirmations[0].innerTxns!.length).toEqual(1);
   });
@@ -288,7 +293,16 @@ describe("NttManager", () => {
       await expect(
         client.send.pause({
           sender: admin,
-          args: [true],
+          args: [],
+        }),
+      ).rejects.toThrow("Uninitialised contract");
+    });
+
+    test("fails to unpause", async () => {
+      await expect(
+        client.send.pause({
+          sender: admin,
+          args: [],
         }),
       ).rejects.toThrow("Uninitialised contract");
     });
@@ -401,7 +415,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
 
       const res = await client
@@ -441,9 +456,9 @@ describe("NttManager", () => {
     });
   });
 
-  describe("pause", () => {
+  describe("pause and unpause", () => {
     beforeAll(async () => {
-      const APP_MIN_BALANCE = (27_700).microAlgos();
+      const APP_MIN_BALANCE = (55_400).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),
@@ -461,38 +476,75 @@ describe("NttManager", () => {
             getAddressRolesBoxKey(DEFAULT_ADMIN_ROLE, admin.publicKey),
           ],
         })
+        .grantRole({
+          sender: admin,
+          args: [UNPAUSER_ROLE, unpauser.toString()],
+          boxReferences: [
+            getRoleBoxKey(UNPAUSER_ROLE),
+            getAddressRolesBoxKey(UNPAUSER_ROLE, unpauser.publicKey),
+            getAddressRolesBoxKey(DEFAULT_ADMIN_ROLE, admin.publicKey),
+          ],
+        })
         .send();
       expect(await client.hasRole({ args: [PAUSER_ROLE, pauser.toString()] })).toBeTruthy();
+      expect(await client.hasRole({ args: [UNPAUSER_ROLE, unpauser.toString()] })).toBeTruthy();
     });
 
-    test("fails when caller is not pauser", async () => {
+    test("pause fails when caller is not pauser", async () => {
       await expect(
         client.send.pause({
           sender: user,
-          args: [true],
+          args: [],
           boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, user.publicKey)],
         }),
       ).rejects.toThrow("Access control unauthorised account");
     });
 
-    test("succeeds", async () => {
-      const newThreshold = 1n;
-      expect(newThreshold).not.toEqual(THRESHOLD);
+    test("unpause fails when caller is not unpauser", async () => {
+      await expect(
+        client.send.unpause({
+          sender: user,
+          args: [],
+          boxReferences: [getRoleBoxKey(UNPAUSER_ROLE), getAddressRolesBoxKey(UNPAUSER_ROLE, user.publicKey)],
+        }),
+      ).rejects.toThrow("Access control unauthorised account");
+    });
 
-      // pause
-      let res = await client.send.pause({
+    test("unpause fails when not paused", async () => {
+      await expect(
+        client.send.unpause({
+          sender: unpauser,
+          args: [],
+          boxReferences: [getRoleBoxKey(UNPAUSER_ROLE), getAddressRolesBoxKey(UNPAUSER_ROLE, unpauser.publicKey)],
+        }),
+      ).rejects.toThrow("Not paused");
+    });
+
+    test("pause succeeds", async () => {
+      const res = await client.send.pause({
         sender: pauser,
-        args: [true],
+        args: [],
         boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
       });
       expect(await client.state.global.isPaused()).toBeTruthy();
       expect(res.confirmations[0].logs![0]).toEqual(getEventBytes("Paused(bool)", [true]));
+    });
 
-      // unpause
-      res = await client.send.pause({
-        sender: pauser,
-        args: [false],
-        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+    test("pause fails when already paused", async () => {
+      await expect(
+        client.send.pause({
+          sender: pauser,
+          args: [],
+          boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+        }),
+      ).rejects.toThrow("Already paused");
+    });
+
+    test("unpause succeeds", async () => {
+      const res = await client.send.unpause({
+        sender: unpauser,
+        args: [],
+        boxReferences: [getRoleBoxKey(UNPAUSER_ROLE), getAddressRolesBoxKey(UNPAUSER_ROLE, unpauser.publicKey)],
       });
       expect(await client.state.global.isPaused()).toBeFalsy();
       expect(res.confirmations[0].logs![0]).toEqual(getEventBytes("Paused(bool)", [false]));
@@ -501,19 +553,25 @@ describe("NttManager", () => {
 
   describe("when paused", () => {
     beforeAll(async () => {
-      await client.send.pause({
-        sender: pauser,
-        args: [true],
-        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
-      });
+      const isPaused = await client.state.global.isPaused();
+      if (!isPaused) {
+        await client.send.pause({
+          sender: pauser,
+          args: [],
+          boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+        });
+      }
     });
 
     afterAll(async () => {
-      await client.send.pause({
-        sender: pauser,
-        args: [false],
-        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
-      });
+      const isPaused = await client.state.global.isPaused();
+      if (isPaused) {
+        await client.send.unpause({
+          sender: unpauser,
+          args: [],
+          boxReferences: [getRoleBoxKey(UNPAUSER_ROLE), getAddressRolesBoxKey(UNPAUSER_ROLE, unpauser.publicKey)],
+        });
+      }
     });
 
     test("fails to transfer (simple)", async () => {
@@ -1017,7 +1075,7 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [1000],
       });
       const feePaymentTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -1055,7 +1113,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const feePaymentTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -1115,7 +1174,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const feePaymentTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -1219,7 +1279,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const feePaymentTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -1471,7 +1532,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const feePaymentTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -1529,7 +1591,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -1615,7 +1678,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const feePaymentTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -1676,7 +1740,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const feePaymentTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -1793,7 +1858,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const feePaymentTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -1901,7 +1967,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -2171,7 +2238,8 @@ describe("NttManager", () => {
         transactions: [opUpTxn],
       } = await opUpClient.createTransaction.ensureBudget({
         sender: admin,
-        args: [0],
+        args: [3000],
+        extraFee: (3000).microAlgos(),
       });
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: user,
@@ -2384,7 +2452,7 @@ describe("NttManager", () => {
       // pause
       await client.send.pause({
         sender: pauser,
-        args: [true],
+        args: [],
         boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
       });
 
@@ -2414,10 +2482,10 @@ describe("NttManager", () => {
       ).rejects.toThrow("Contract is paused");
 
       // unpause
-      await client.send.pause({
-        sender: pauser,
-        args: [false],
-        boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
+      await client.send.unpause({
+        sender: unpauser,
+        args: [],
+        boxReferences: [getRoleBoxKey(UNPAUSER_ROLE), getAddressRolesBoxKey(UNPAUSER_ROLE, pauser.publicKey)],
       });
     });
 

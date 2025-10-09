@@ -1,7 +1,7 @@
 algokit==2.7.1
 algokit-utils==4.1.0
 algorand-python==2.7.0
-algorand-smart-contract-library @ git+https://github.com/Folks-Finance/algorand-smart-contract-library.git@2c4cc2a8e80d28c38dc48c51fec51d2206e34023
+algorand-smart-contract-library @ git+https://github.com/Folks-Finance/algorand-smart-contract-library.git@d1382cc2248629f107abfd3fd4393ef855adf833
 attrs==24.3.0
 cattrs==24.1.2
 cffi==1.17.1

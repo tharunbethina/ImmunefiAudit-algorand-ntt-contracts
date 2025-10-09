@@ -79,6 +79,8 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
         self._only_initialised()
         self._check_sender_role(self.manager_role())
 
+        assert peer_chain_id != self.chain_id.value, "Cannot set itself as peer chain"
+
         # set peer (overriding if needed)
         self.wormhole_peers[peer_chain_id] = peer_contract_address.copy()
         emit(WormholePeerSet(peer_chain_id, peer_contract_address))
@@ -209,8 +211,7 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
         wormhole_core_address, exists = op.AppParamsGet.app_address(self.wormhole_core.value)
         assert exists, "Wormhole Core address unknown"
 
-        core_fee = self._get_wormhole_core_message_fee()
-        payment = itxn.Payment(receiver=wormhole_core_address, amount=core_fee, fee=0)
+        payment = itxn.Payment(receiver=wormhole_core_address, amount=total_fee, fee=0)
         app_call = itxn.ApplicationCall(
             app_id=self.wormhole_core.value,
             app_args=(Bytes(b"publishMessage"), payload, op.itob(0)),
@@ -224,16 +225,6 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
         message_fee, exists = op.AppGlobal.get_ex_uint64(self.wormhole_core.value, Bytes(b"MessageFee"))
         assert exists, "Wormhole message fee is unknown"
         return message_fee
-
-    @subroutine
-    def _get_wormhole_emitter_sequence(self) -> UInt64:
-        sequence, exists = op.AppLocal.get_ex_bytes(
-            Account(self.emitter_lsig.value.bytes),
-            self.wormhole_core.value,
-            Bytes.from_hex("00")
-        )
-        assert exists, "Sequence is unknown"
-        return op.extract_uint64(sequence, 0)
 
     @subroutine
     def _set_vaa_consumed(self, vaa_digest: Bytes32) -> None:
