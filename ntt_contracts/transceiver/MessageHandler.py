@@ -74,7 +74,7 @@ class MessageHandler(ARC4Contract, ABC):
             app_id=self.transceiver_manager.value,
             fee=0,
         )
-        return Bool(message_attestations >= self.threshold.value)
+        return Bool(message_attestations > 0 and message_attestations >= self.threshold.value)
 
     @abimethod(readonly=True)
     def is_message_executed(self, message_digest: Bytes32) -> Bool:

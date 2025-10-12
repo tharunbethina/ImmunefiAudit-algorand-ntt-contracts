@@ -3,7 +3,7 @@ import type { TransactionSignerAccount } from "@algorandfoundation/algokit-utils
 import type { Account, Address } from "algosdk";
 
 import { MathLibExposedClient, MathLibExposedFactory } from "../../specs/client/MathLibExposed.client.ts";
-import { MAX_UINT8, MAX_UINT64, MAX_UINT256 } from "../utils/uint.ts";
+import { MAX_UINT8, MAX_UINT64 } from "../utils/uint.ts";
 
 describe("TrimmedAmountLib", () => {
   const localnet = algorandFixture();
@@ -31,20 +31,6 @@ describe("TrimmedAmountLib", () => {
     appId = result.appId;
     client = appClient;
     expect(appId).not.toEqual(0n);
-  });
-
-  test("max uint64 constant", async () => {
-    expect(await client.maxUint64Constant()).toEqual(MAX_UINT64);
-  });
-
-  describe("safe case uint256 to uint64", () => {
-    test.each([{ a: MAX_UINT256 }, { a: MAX_UINT64 + 1n }])("fails for $a", async ({ a }) => {
-      await expect(client.send.safeCastUint256ToUint64({ args: [a] })).rejects.toThrow("Cannot cast uint256 to uint64");
-    });
-
-    test.each([{ a: MAX_UINT64 }, { a: 1234n }])("succeeds for $a", async ({ a }) => {
-      expect(await client.safeCastUint256ToUint64({ args: [a] })).toEqual(a);
-    });
   });
 
   describe("max uint8", () => {

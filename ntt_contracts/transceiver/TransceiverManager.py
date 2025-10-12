@@ -1,9 +1,8 @@
 from algopy import BoxMap, Global, Txn, UInt64, gtxn, itxn, op, subroutine, uenumerate
 from algopy.arc4 import Address, Bool, DynamicArray, DynamicBytes, Struct, UInt256, abi_call, abimethod, emit
 
-from folks_contracts.library import UInt64SetLib
+from folks_contracts.library import BytesUtils, UInt64SetLib
 from folks_contracts.library.AccessControl import AccessControl
-from ..library import MathLib
 from ..types import ARC4UInt64, Bytes16, Bytes32, TransceiverInstructions, MessageToSend, MessageReceived
 from .interfaces.ITransceiver import ITransceiver
 from .interfaces.ITransceiverManager import (
@@ -22,12 +21,20 @@ class TransceiverAttestationKey(Struct):
     transceiver: ARC4UInt64 # app id
 
 
+# Events
+class Paused(Struct):
+    message_handler: ARC4UInt64
+    is_paused: Bool
+
+
 class TransceiverManager(ITransceiverManager, AccessControl):
     def __init__(self) -> None:
         AccessControl.__init__(self)
 
         self.max_transceivers = UInt64(32)
 
+        # message handler -> whether is paused
+        self.handler_paused = BoxMap(UInt64, Bool, key_prefix=b"handler_paused_")
         # message handler -> configured transceivers
         self.handler_transceivers = BoxMap(UInt64, DynamicArray[ARC4UInt64], key_prefix=b"handler_transceivers_")
 
@@ -47,14 +54,48 @@ class TransceiverManager(ITransceiverManager, AccessControl):
             return Bool(False)
 
         # grant admin role and make itself its own admin
-        role = self.message_handler_admin_role(message_handler)
-        self._grant_role(role, message_handler_admin)
-        self._set_role_admin(role, role.copy())
+        admin_role = self.message_handler_admin_role(message_handler)
+        self._grant_role(admin_role, message_handler_admin)
+        self._set_role_admin(admin_role, admin_role.copy())
+
+        # setup pauser and unpauser role's admin so can be assigned
+        self._set_role_admin(self.message_handler_pauser_role(message_handler), admin_role.copy())
+        self._set_role_admin(self.message_handler_unpauser_role(message_handler), admin_role.copy())
 
         # add message handler
         self.handler_transceivers[message_handler] = DynamicArray[ARC4UInt64]()
         emit(MessageHandlerAdded(ARC4UInt64(message_handler), message_handler_admin))
         return Bool(True)
+
+    @abimethod
+    def pause(self, message_handler: UInt64) -> None:
+        """Pause outgoing messages and received attestations in case of emergency.
+
+        Args:
+            message_handler (UInt64): The message handler app id
+        """
+        self._check_sender_role(self.message_handler_pauser_role(message_handler))
+
+        assert not self.is_message_handler_paused(message_handler), "Already paused"
+
+        # set whether paused or not
+        self.handler_paused[message_handler] = Bool(True)
+        emit(Paused(ARC4UInt64(message_handler), Bool(True)))
+
+    @abimethod
+    def unpause(self, message_handler: UInt64) -> None:
+        """Resume outgoing messages and received attestations after previous pause.
+
+        Args:
+            message_handler (UInt64): The message handler app id
+        """
+        self._check_sender_role(self.message_handler_unpauser_role(message_handler))
+
+        assert self.is_message_handler_paused(message_handler), "Not paused"
+
+        # set whether paused or not
+        self.handler_paused[message_handler] = Bool(False)
+        emit(Paused(ARC4UInt64(message_handler), Bool(False)))
 
     @abimethod
     def add_transceiver(self, message_handler: UInt64, transceiver: UInt64) -> None:
@@ -115,6 +156,7 @@ class TransceiverManager(ITransceiverManager, AccessControl):
         message_handler = Global.caller_application_id
         assert message_handler, "Caller must be an application"
         self._check_message_handler_known(message_handler)
+        self._check_message_handler_not_paused(message_handler)
 
         # check message source address matches caller
         assert message.source_address == Bytes32.from_bytes(Txn.sender.bytes), "Unexpected message source address"
@@ -136,9 +178,10 @@ class TransceiverManager(ITransceiverManager, AccessControl):
         # check caller is configured transceiver for message handler
         transceiver = Global.caller_application_id
         assert transceiver, "Caller must be an application"
-        message_handler = MathLib.safe_cast_uint256_to_uint64(UInt256.from_bytes(message.handler_address.bytes))
-        self._check_message_handler_known(message_handler)
+        message_handler = BytesUtils.safe_convert_bytes32_to_uint64(message.handler_address.copy())
+        # _check_transceiver_configured also checks if message handler is known
         self._check_transceiver_configured(message_handler, transceiver)
+        self._check_message_handler_not_paused(message_handler)
 
         # calculate message digest and retrieve number of attestations
         message_digest = self.calculate_message_digest(message)
@@ -195,8 +238,38 @@ class TransceiverManager(ITransceiverManager, AccessControl):
         return Bytes16.from_bytes(op.extract(op.keccak256(name), 0, 16))
 
     @abimethod(readonly=True)
+    def message_handler_pauser_role(self, message_handler: UInt64) -> Bytes16:
+        """Returns the role identifier for the given message handler's pauser role
+
+        Args:
+            message_handler (UInt64): The message handler app id
+
+        Returns:
+            Role bytes of length 16
+        """
+        name = b"MESSAGE_HANDLER_PAUSER_" + op.itob(message_handler)
+        return Bytes16.from_bytes(op.extract(op.keccak256(name), 0, 16))
+
+    @abimethod(readonly=True)
+    def message_handler_unpauser_role(self, message_handler: UInt64) -> Bytes16:
+        """Returns the role identifier for the given message handler's unpauser role
+
+        Args:
+            message_handler (UInt64): The message handler app id
+
+        Returns:
+            Role bytes of length 16
+        """
+        name = b"MESSAGE_HANDLER_UNPAUSER_" + op.itob(message_handler)
+        return Bytes16.from_bytes(op.extract(op.keccak256(name), 0, 16))
+
+    @abimethod(readonly=True)
     def is_message_handler_known(self, message_handler: UInt64) -> Bool:
         return Bool(message_handler in self.handler_transceivers)
+
+    @abimethod(readonly=True)
+    def is_message_handler_paused(self, message_handler: UInt64) -> Bool:
+        return Bool(message_handler in self.handler_paused) and self.handler_paused[message_handler]
 
     @abimethod(readonly=True)
     def is_transceiver_configured(self, message_handler: UInt64, transceiver: UInt64) -> Bool:
@@ -210,6 +283,10 @@ class TransceiverManager(ITransceiverManager, AccessControl):
     @subroutine
     def _check_message_handler_known(self, message_handler: UInt64) -> None:
         assert self.is_message_handler_known(message_handler), "Message handler unknown"
+
+    @subroutine
+    def _check_message_handler_not_paused(self, message_handler: UInt64) -> None:
+        assert not self.is_message_handler_paused(message_handler), "Message handler is paused"
 
     @subroutine
     def _check_transceiver_configured(self, message_handler: UInt64, transceiver: UInt64) -> None:

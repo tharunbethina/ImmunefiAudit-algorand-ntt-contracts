@@ -204,6 +204,16 @@ describe("WormholeTransceiver", () => {
       ).rejects.toThrow("Access control unauthorised account");
     });
 
+    test("fails when caller is not manager", async () => {
+      await expect(
+        client.send.setWormholePeer({
+          sender: admin,
+          args: [SOURCE_CHAIN_ID, getRandomBytes(32)],
+          boxReferences: [getAddressRolesBoxKey(MANAGER_ROLE, admin.publicKey), getWormholePeersBoxKey(PEER_CHAIN_ID)],
+        }),
+      ).rejects.toThrow("Cannot set itself as peer chain");
+    });
+
     test("succeeds when new chain", async () => {
       const APP_MIN_BALANCE = (21_700).microAlgos();
 

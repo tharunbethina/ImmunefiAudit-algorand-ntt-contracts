@@ -12,6 +12,7 @@ import {
   getAddressRolesBoxKey,
   getHandlerTransceiversBoxKey,
   getNumAttestationsBoxKey,
+  getRoleBoxKey,
   getTransceiverAttestationsBoxKey,
 } from "../utils/boxes.ts";
 import { convertNumberToBytes, enc, getEventBytes, getRandomBytes } from "../utils/bytes.ts";
@@ -30,6 +31,16 @@ describe("TransceiverManager", () => {
   const DEFAULT_ADMIN_ROLE = new Uint8Array(16);
   const MESSAGE_HANDLER_ADMIN_ROLE = (appId: number | bigint) =>
     keccak_256(Uint8Array.from([...enc.encode("MESSAGE_HANDLER_ADMIN_"), ...convertNumberToBytes(appId, 8)])).slice(
+      0,
+      16,
+    );
+  const MESSAGE_HANDLER_PAUSER_ROLE = (appId: number | bigint) =>
+    keccak_256(Uint8Array.from([...enc.encode("MESSAGE_HANDLER_PAUSER_"), ...convertNumberToBytes(appId, 8)])).slice(
+      0,
+      16,
+    );
+  const MESSAGE_HANDLER_UNPAUSER_ROLE = (appId: number | bigint) =>
+    keccak_256(Uint8Array.from([...enc.encode("MESSAGE_HANDLER_UNPAUSER_"), ...convertNumberToBytes(appId, 8)])).slice(
       0,
       16,
     );
@@ -55,6 +66,8 @@ describe("TransceiverManager", () => {
 
   let creator: Address & Account & TransactionSignerAccount;
   let admin: Address & Account & TransactionSignerAccount;
+  let pauser: Address & Account & TransactionSignerAccount;
+  let unpauser: Address & Account & TransactionSignerAccount;
   let user: Address & Account & TransactionSignerAccount;
 
   beforeAll(async () => {
@@ -63,6 +76,8 @@ describe("TransceiverManager", () => {
 
     creator = await generateAccount({ initialFunds: (100).algo() });
     admin = await generateAccount({ initialFunds: (100).algo() });
+    pauser = await generateAccount({ initialFunds: (100).algo() });
+    unpauser = await generateAccount({ initialFunds: (100).algo() });
     user = await generateAccount({ initialFunds: (100).algo() });
 
     factory = algorand.client.getTypedAppFactory(TransceiverManagerFactory, {
@@ -142,6 +157,20 @@ describe("TransceiverManager", () => {
     );
   });
 
+  test("message handler pauser role returns correct value", async () => {
+    const messageHandler = getRandomUInt(MAX_UINT64);
+    expect(await client.messageHandlerPauserRole({ args: [messageHandler] })).toEqual(
+      MESSAGE_HANDLER_PAUSER_ROLE(messageHandler),
+    );
+  });
+
+  test("message handler unpauser role returns correct value", async () => {
+    const messageHandler = getRandomUInt(MAX_UINT64);
+    expect(await client.messageHandlerUnpauserRole({ args: [messageHandler] })).toEqual(
+      MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandler),
+    );
+  });
+
   test("calculate message digest returns correct value", async () => {
     const message = getMessageReceived(getRandomUInt(MAX_UINT16), getRandomMessageToSend());
     const messageDigest = calculateMessageDigest(message);
@@ -167,7 +196,7 @@ describe("TransceiverManager", () => {
       expect(await client.isMessageHandlerKnown({ args: [messageHandlerAppId] })).toBeFalsy();
 
       // add message handler
-      const APP_MIN_BALANCE = (159_900).microAlgos();
+      const APP_MIN_BALANCE = (194_500).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),
@@ -185,15 +214,19 @@ describe("TransceiverManager", () => {
 
       expect(res.returns).toEqual([true]);
       const messageHandlerAdminRole = MESSAGE_HANDLER_ADMIN_ROLE(messageHandlerAppId);
+      const messageHandlerPauserRole = MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId);
+      const messageHandlerUnpauserRole = MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId);
       expect(await client.isMessageHandlerKnown({ args: [messageHandlerAppId] })).toBeTruthy();
       expect(await client.hasRole({ args: [messageHandlerAdminRole, admin.toString()] })).toBeTruthy();
       expect(await client.getRoleAdmin({ args: [messageHandlerAdminRole] })).toEqual(messageHandlerAdminRole);
+      expect(await client.getRoleAdmin({ args: [messageHandlerPauserRole] })).toEqual(messageHandlerAdminRole);
+      expect(await client.getRoleAdmin({ args: [messageHandlerUnpauserRole] })).toEqual(messageHandlerAdminRole);
       expect(await client.getHandlerTransceivers({ args: [messageHandlerAppId] })).toEqual([]);
 
       expect(res.confirmations[1].innerTxns!.length).toEqual(1);
       expect(res.confirmations[1].innerTxns![0].txn.txn.type).toEqual("appl");
       expect(res.confirmations[1].innerTxns![0].txn.txn.applicationCall!.appIndex).toEqual(appId);
-      expect(res.confirmations[1].innerTxns![0].logs!.length).toEqual(4);
+      expect(res.confirmations[1].innerTxns![0].logs!.length).toEqual(6);
       expect(res.confirmations[1].innerTxns![0].logs![0]).toEqual(
         getEventBytes("RoleGranted(byte[16],address,address)", [
           messageHandlerAdminRole,
@@ -209,6 +242,20 @@ describe("TransceiverManager", () => {
         ]),
       );
       expect(res.confirmations[1].innerTxns![0].logs![2]).toEqual(
+        getEventBytes("RoleAdminChanged(byte[16],byte[16],byte[16])", [
+          messageHandlerPauserRole,
+          DEFAULT_ADMIN_ROLE,
+          messageHandlerAdminRole,
+        ]),
+      );
+      expect(res.confirmations[1].innerTxns![0].logs![3]).toEqual(
+        getEventBytes("RoleAdminChanged(byte[16],byte[16],byte[16])", [
+          messageHandlerUnpauserRole,
+          DEFAULT_ADMIN_ROLE,
+          messageHandlerAdminRole,
+        ]),
+      );
+      expect(res.confirmations[1].innerTxns![0].logs![4]).toEqual(
         getEventBytes("MessageHandlerAdded(uint64,address)", [messageHandlerAppId, admin.toString()]),
       );
     });
@@ -218,7 +265,7 @@ describe("TransceiverManager", () => {
       expect(await client.isMessageHandlerKnown({ args: [messageHandlerAppIdWithNoTransceivers] })).toBeFalsy();
 
       // add message handler
-      const APP_MIN_BALANCE = (59_900).microAlgos();
+      const APP_MIN_BALANCE = (94_500).microAlgos();
       const fundingTxn = await localnet.algorand.createTransaction.payment({
         sender: creator,
         receiver: getApplicationAddress(appId),
@@ -254,6 +301,133 @@ describe("TransceiverManager", () => {
       expect(await client.isMessageHandlerKnown({ args: [messageHandlerAppId] })).toBeTruthy();
       expect(res.return).toBeFalsy();
       expect(res.confirmations[0].innerTxns![0].logs!.length).toEqual(1);
+    });
+  });
+
+  describe("pause and unpause", () => {
+    beforeAll(async () => {
+      const APP_MIN_BALANCE = (55_400).microAlgos();
+      const fundingTxn = await localnet.algorand.createTransaction.payment({
+        sender: creator,
+        receiver: getApplicationAddress(appId),
+        amount: APP_MIN_BALANCE,
+      });
+      await client
+        .newGroup()
+        .addTransaction(fundingTxn)
+        .grantRole({
+          sender: admin,
+          args: [MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId), pauser.toString()],
+          boxReferences: [
+            getRoleBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId)),
+            getAddressRolesBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId), pauser.publicKey),
+            getAddressRolesBoxKey(DEFAULT_ADMIN_ROLE, admin.publicKey),
+          ],
+        })
+        .grantRole({
+          sender: admin,
+          args: [MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId), unpauser.toString()],
+          boxReferences: [
+            getRoleBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId)),
+            getAddressRolesBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId), unpauser.publicKey),
+            getAddressRolesBoxKey(DEFAULT_ADMIN_ROLE, admin.publicKey),
+          ],
+        })
+        .send();
+      expect(
+        await client.hasRole({ args: [MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId), pauser.toString()] }),
+      ).toBeTruthy();
+      expect(
+        await client.hasRole({ args: [MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId), unpauser.toString()] }),
+      ).toBeTruthy();
+    });
+
+    test("pause fails when caller is not pauser", async () => {
+      await expect(
+        client.send.pause({
+          sender: user,
+          args: [messageHandlerAppId],
+          boxReferences: [
+            getRoleBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId)),
+            getAddressRolesBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId), user.publicKey),
+          ],
+        }),
+      ).rejects.toThrow("Access control unauthorised account");
+    });
+
+    test("unpause fails when caller is not unpauser", async () => {
+      await expect(
+        client.send.unpause({
+          sender: user,
+          args: [messageHandlerAppId],
+          boxReferences: [
+            getRoleBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId)),
+            getAddressRolesBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId), user.publicKey),
+          ],
+        }),
+      ).rejects.toThrow("Access control unauthorised account");
+    });
+
+    test("unpause fails when not paused", async () => {
+      await expect(
+        client.send.unpause({
+          sender: unpauser,
+          args: [messageHandlerAppId],
+          boxReferences: [
+            getRoleBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId)),
+            getAddressRolesBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId), unpauser.publicKey),
+          ],
+        }),
+      ).rejects.toThrow("Not paused");
+    });
+
+    test("pause succeeds", async () => {
+      const APP_MIN_BALANCE = (12_100).microAlgos();
+      const fundingTxn = await localnet.algorand.createTransaction.payment({
+        sender: creator,
+        receiver: getApplicationAddress(appId),
+        amount: APP_MIN_BALANCE,
+      });
+      const res = await client
+        .newGroup()
+        .addTransaction(fundingTxn)
+        .pause({
+          sender: pauser,
+          args: [messageHandlerAppId],
+          boxReferences: [
+            getRoleBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId)),
+            getAddressRolesBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId), pauser.publicKey),
+          ],
+        })
+        .send();
+      expect(await client.isMessageHandlerPaused({ sender: user, args: [messageHandlerAppId] })).toBeTruthy();
+      expect(res.confirmations[1].logs![0]).toEqual(getEventBytes("Paused(uint64,bool)", [messageHandlerAppId, true]));
+    });
+
+    test("pause fails when already paused", async () => {
+      await expect(
+        client.send.pause({
+          sender: pauser,
+          args: [messageHandlerAppId],
+          boxReferences: [
+            getRoleBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId)),
+            getAddressRolesBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId), pauser.publicKey),
+          ],
+        }),
+      ).rejects.toThrow("Already paused");
+    });
+
+    test("unpause succeeds", async () => {
+      const res = await client.send.unpause({
+        sender: unpauser,
+        args: [messageHandlerAppId],
+        boxReferences: [
+          getRoleBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId)),
+          getAddressRolesBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId), unpauser.publicKey),
+        ],
+      });
+      expect(await client.isMessageHandlerPaused({ sender: user, args: [messageHandlerAppId] })).toBeFalsy();
+      expect(res.confirmations[0].logs![0]).toEqual(getEventBytes("Paused(uint64,bool)", [messageHandlerAppId, false]));
     });
   });
 
@@ -703,6 +877,41 @@ describe("TransceiverManager", () => {
       ).rejects.toThrow("Message handler unknown");
     });
 
+    test("fails when message handler is paused", async () => {
+      // pause
+      await client.send.pause({
+        sender: pauser,
+        args: [messageHandlerAppId],
+        boxReferences: [
+          getRoleBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId)),
+          getAddressRolesBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId), pauser.publicKey),
+        ],
+      });
+
+      // send message
+      const added = await client.getHandlerTransceivers({ args: [messageHandlerAppId] });
+      const message = getRandomMessageToSend({ sourceAddress: getApplicationAddress(messageHandlerAppId).publicKey });
+      await expect(
+        messageHandlerClient.send.sendMessageToTransceivers({
+          sender: user,
+          args: [TOTAL_QUOTE, getApplicationAddress(appId).toString(), appId, message, []],
+          appReferences: [appId, ...added],
+          boxReferences: [getHandlerTransceiversBoxKey(messageHandlerAppId)],
+          extraFee: (2000).microAlgos(),
+        }),
+      ).rejects.toThrow("Message handler is paused");
+
+      // unpause
+      await client.send.unpause({
+        sender: unpauser,
+        args: [messageHandlerAppId],
+        boxReferences: [
+          getRoleBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId)),
+          getAddressRolesBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId), unpauser.publicKey),
+        ],
+      });
+    });
+
     test("fails when message source address doesn't match caller", async () => {
       const transceiverAppId = transceiverAppIds[0];
       const message = getRandomMessageToSend({ sourceAddress: user.publicKey });
@@ -887,7 +1096,7 @@ describe("TransceiverManager", () => {
     });
   });
 
-  describe("attestation_received", () => {
+  describe("attestation received", () => {
     let messageReceived: MessageReceived;
     let messageDigest: Uint8Array;
 
@@ -947,6 +1156,45 @@ describe("TransceiverManager", () => {
           extraFee: (1000).microAlgos(),
         }),
       ).rejects.toThrow("Transceiver not configured");
+    });
+
+    test("fails when message handler is paused", async () => {
+      // pause
+      await client.send.pause({
+        sender: pauser,
+        args: [messageHandlerAppId],
+        boxReferences: [
+          getRoleBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId)),
+          getAddressRolesBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId), pauser.publicKey),
+        ],
+      });
+
+      // deliver message
+      const added = await client.getHandlerTransceivers({ args: [messageHandlerAppId] });
+      const transceiverAppId = added[NUM_TRANSCEIVERS_ADDED - 1];
+      await expect(
+        transceiverFactory.getAppClientById({ appId: transceiverAppId }).send.deliverMessage({
+          sender: user,
+          args: [messageReceived],
+          appReferences: [appId],
+          boxReferences: [
+            getHandlerTransceiversBoxKey(messageHandlerAppId),
+            getTransceiverAttestationsBoxKey(messageDigest, transceiverAppId),
+            getNumAttestationsBoxKey(messageDigest),
+          ],
+          extraFee: (1000).microAlgos(),
+        }),
+      ).rejects.toThrow("Message handler is paused");
+
+      // unpause
+      await client.send.unpause({
+        sender: unpauser,
+        args: [messageHandlerAppId],
+        boxReferences: [
+          getRoleBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId)),
+          getAddressRolesBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId), unpauser.publicKey),
+        ],
+      });
     });
 
     test("succeeds on first attestation", async () => {

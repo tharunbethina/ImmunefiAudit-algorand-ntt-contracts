@@ -1,7 +1,7 @@
 from algopy import Bytes, Global, UInt64, gtxn, itxn, op
 from algopy.arc4 import Address, Bool, DynamicArray, UInt256, Struct, abi_call, abimethod, emit
 
-from ...library import MathLib
+from folks_contracts.library import BytesUtils
 from ...types import ARC4UInt64, Bytes32, TransceiverInstructions, MessageToSend, MessageReceived
 from ..interfaces.ITransceiverManager import (
     ITransceiverManager,
@@ -30,7 +30,7 @@ class MessageSentToTransceivers(Struct):
 class MockTransceiverManager(ITransceiverManager):
     def __init__(self) -> None:
         self._message_attestations = UInt64(0)
-        self._message_digest = Bytes32.from_bytes(op.bzero(16))
+        self._message_digest = Bytes32.from_bytes(op.bzero(32))
         self._handler_transceivers = DynamicArray[ARC4UInt64]()
         self._total_delivery_price = UInt64(0)
 
@@ -137,7 +137,7 @@ class MockTransceiverManager(ITransceiverManager):
 
     @abimethod
     def attestation_received(self, message: MessageReceived) -> None:
-        message_handler = MathLib.safe_cast_uint256_to_uint64(UInt256.from_bytes(message.handler_address.bytes))
+        message_handler = BytesUtils.safe_convert_bytes32_to_uint64(message.handler_address.copy())
         message_digest = self.calculate_message_digest(message)
         new_num_attestations = self.message_attestations(message_digest) + 1
 
