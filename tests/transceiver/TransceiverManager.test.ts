@@ -378,7 +378,7 @@ describe("TransceiverManager", () => {
             getAddressRolesBoxKey(MESSAGE_HANDLER_UNPAUSER_ROLE(messageHandlerAppId), unpauser.publicKey),
           ],
         }),
-      ).rejects.toThrow("Not paused");
+      ).rejects.toThrow("Message handler is not paused");
     });
 
     test("pause succeeds", async () => {
@@ -414,7 +414,7 @@ describe("TransceiverManager", () => {
             getAddressRolesBoxKey(MESSAGE_HANDLER_PAUSER_ROLE(messageHandlerAppId), pauser.publicKey),
           ],
         }),
-      ).rejects.toThrow("Already paused");
+      ).rejects.toThrow("Message handler is paused");
     });
 
     test("unpause succeeds", async () => {
@@ -639,7 +639,7 @@ describe("TransceiverManager", () => {
             ],
           })
           .send(),
-      ).rejects.toThrow("Transceiver was not added");
+      ).rejects.toThrow("Unknown transceiver");
     });
 
     test("succeeds when removing one transceiver", async () => {
@@ -923,7 +923,7 @@ describe("TransceiverManager", () => {
           boxReferences: [getHandlerTransceiversBoxKey(transceiverAppId)],
           extraFee: (2000).microAlgos(),
         }),
-      ).rejects.toThrow("Unexpected message source address");
+      ).rejects.toThrow("Caller must be message source address");
     });
 
     test("fails when 0 transceivers configured", async () => {
@@ -1018,7 +1018,11 @@ describe("TransceiverManager", () => {
           boxReferences: [getHandlerTransceiversBoxKey(messageHandlerAppId)],
           extraFee: (2000 + NUM_TRANSCEIVERS_ADDED * 3000).microAlgos(),
         }),
-      ).rejects.toThrow("Incorrect fee payment");
+      ).rejects.toThrow(
+        // TODO https://github.com/algorandfoundation/algokit-utils-ts/issues/445
+        // "Incorrect fee payment amount"
+        "transaction rejected by ApprovalProgram",
+      );
     });
 
     test("fails when fee payment is too high", async () => {
@@ -1034,7 +1038,11 @@ describe("TransceiverManager", () => {
           boxReferences: [getHandlerTransceiversBoxKey(messageHandlerAppId)],
           extraFee: (2000 + NUM_TRANSCEIVERS_ADDED * 3000).microAlgos(),
         }),
-      ).rejects.toThrow("Incorrect fee payment");
+      ).rejects.toThrow(
+        // TODO https://github.com/algorandfoundation/algokit-utils-ts/issues/445
+        // "Incorrect fee payment amount"
+        "transaction rejected by ApprovalProgram",
+      );
     });
 
     test("succeeds", async () => {

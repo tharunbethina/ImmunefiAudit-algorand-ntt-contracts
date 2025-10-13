@@ -1,24 +1,7 @@
-algokit==2.7.1
-algokit-utils==4.1.0
-algorand-python==2.7.0
-algorand-smart-contract-library @ git+https://github.com/Folks-Finance/algorand-smart-contract-library.git@d1382cc2248629f107abfd3fd4393ef855adf833
-attrs==24.3.0
-cattrs==24.1.2
-cffi==1.17.1
-docstring-parser==0.14.1
-executing==2.0.1
-immutabledict==4.2.1
-msgpack==1.1.0
-mypy-extensions==1.0.0
-networkx==3.4.2
-packaging==24.2
-puyapy==4.4.2
-py-algorand-sdk==2.8.0
-pycparser==2.22
-pycryptodomex==3.21.0
-PyNaCl==1.5.0
-semantic-version==2.10.0
+algokit==2.9.1
+algokit-utils==4.2.1
+algorand-python==3.0.0
+algorand-smart-contract-library @ git+https://github.com/Folks-Finance/algorand-smart-contract-library.git@6b219ce4f2934b6083d445c9fb8d932975621ed0
+puyapy==5.1.0
+py-algorand-sdk==2.11.1
 setuptools==80.9.0
-structlog==24.4.0
-tabulate==0.9.0
-typing_extensions==4.12.2

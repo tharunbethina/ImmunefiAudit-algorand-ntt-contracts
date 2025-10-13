@@ -16,6 +16,18 @@ Bytes8: TypeAlias = StaticArray[Byte, Literal[8]]
 Bytes16: TypeAlias = StaticArray[Byte, Literal[16]]
 Bytes32: TypeAlias = StaticArray[Byte, Literal[32]]
 
+# wormhole formatted address
+UniversalAddress: TypeAlias = Bytes32
+
+# keccak256(keccak256(vaa_body))
+VaaDigest: TypeAlias = Bytes32
+
+# keccak256(message_received)
+MessageDigest: TypeAlias = Bytes32
+
+# custom defined by MessageHandler so no guarantees
+MessageId: TypeAlias = Bytes32
+
 class TrimmedAmount(Struct, frozen=True):
     amount: ARC4UInt64
     decimals: ARC4UInt8
@@ -27,17 +39,17 @@ class TransceiverInstruction(Struct, frozen=True):
 TransceiverInstructions: TypeAlias = DynamicArray[TransceiverInstruction]
 
 class MessageToSend(NamedTuple):
-    id: Bytes32 # user defined so no guarantees - used to group messages from different transceivers
-    user_address: Bytes32
-    source_address: Bytes32
+    id: MessageId # used to group messages from different transceivers
+    user_address: UniversalAddress
+    source_address: UniversalAddress
     destination_chain_id: ARC4UInt16
-    handler_address: Bytes32
+    handler_address: UniversalAddress
     payload: Bytes
 
 class MessageReceived(NamedTuple):
-    id: Bytes32 # user defined so no guarantees - used to group messages from different transceivers
-    user_address: Bytes32
+    id: MessageId # used to group messages from different transceivers
+    user_address: UniversalAddress
     source_chain_id: ARC4UInt16
-    source_address: Bytes32
-    handler_address: Bytes32
+    source_address: UniversalAddress
+    handler_address: UniversalAddress
     payload: Bytes

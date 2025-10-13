@@ -1,5 +1,5 @@
-from algopy import UInt64, op, subroutine
-from algopy.arc4 import UInt8, UInt256
+from algopy import UInt64, subroutine
+from algopy.arc4 import UInt8
 
 @subroutine
 def max_uint8(a: UInt8, b: UInt8) -> UInt8:

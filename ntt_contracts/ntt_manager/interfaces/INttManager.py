@@ -2,12 +2,12 @@ from abc import ABC, abstractmethod
 from algopy import ARC4Contract, UInt64, gtxn
 from algopy.arc4 import Bool, Struct,UInt16, abimethod
 
-from ...types import ARC4UInt8, Bytes32, TransceiverInstructions
+from ...types import ARC4UInt8, MessageDigest, MessageId, TransceiverInstructions, UniversalAddress
 
 
 # Structs
 class NttManagerPeer(Struct):
-    peer_contract: Bytes32
+    peer_contract: UniversalAddress
     decimals: ARC4UInt8
 
 
@@ -20,8 +20,8 @@ class INttManager(ARC4Contract, ABC):
         send_token: gtxn.AssetTransferTransaction,
         amount: UInt64,
         recipient_chain: UInt16,
-        recipient: Bytes32
-    ) -> Bytes32:
+        recipient: UniversalAddress
+    ) -> MessageId:
         """Transfer a given amount to a recipient on a given chain. Function exposes full parameters available for any
         customisation needed. Uses default values for unexposed parameters.
 
@@ -45,10 +45,10 @@ class INttManager(ARC4Contract, ABC):
         send_token: gtxn.AssetTransferTransaction,
         amount: UInt64,
         recipient_chain: UInt16,
-        recipient: Bytes32,
+        recipient: UniversalAddress,
         should_queue: Bool,
         transceiver_instructions: TransceiverInstructions,
-    ) -> Bytes32:
+    ) -> MessageId:
         """Transfer a given amount to a recipient on a given chain. Function exposes full parameters available for any
         customisation needed.
 
@@ -69,7 +69,11 @@ class INttManager(ARC4Contract, ABC):
 
     @abstractmethod
     @abimethod
-    def complete_outbound_queued_transfer(self, fee_payment: gtxn.PaymentTransaction, message_id: Bytes32) -> Bytes32:
+    def complete_outbound_queued_transfer(
+        self,
+        fee_payment: gtxn.PaymentTransaction,
+        message_id: MessageId,
+    ) -> MessageId:
         """Complete an outbound transfer that's been queued.
 
         Args:
@@ -83,7 +87,7 @@ class INttManager(ARC4Contract, ABC):
 
     @abstractmethod
     @abimethod
-    def cancel_outbound_queued_transfer(self, message_id: Bytes32) -> None:
+    def cancel_outbound_queued_transfer(self, message_id: MessageId) -> None:
         """Cancels an outbound transfer that's been queued.
 
         Args:
@@ -93,7 +97,7 @@ class INttManager(ARC4Contract, ABC):
 
     @abstractmethod
     @abimethod
-    def complete_inbound_queued_transfer(self, message_digest: Bytes32) -> None:
+    def complete_inbound_queued_transfer(self, message_digest: MessageDigest) -> None:
         """Complete an inbound queued transfer.
 
         Args:

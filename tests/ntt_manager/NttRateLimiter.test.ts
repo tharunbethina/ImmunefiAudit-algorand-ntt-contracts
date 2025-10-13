@@ -398,7 +398,7 @@ describe("NttRateLimiter", () => {
           ],
           boxReferences: [outboundBucketId],
         }),
-      ).rejects.toThrow("Not enough capacity");
+      ).rejects.toThrow("Insufficient capacity for outbound queued transfer");
     });
 
     test("succeeds when can queue and insufficient capacity", async () => {

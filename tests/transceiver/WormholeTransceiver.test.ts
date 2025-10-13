@@ -397,7 +397,7 @@ describe("WormholeTransceiver", () => {
             boxReferences: [getWormholePeersBoxKey(PEER_CHAIN_ID), getVAAsConsumedBoxKey(vaaDigest)],
             extraFee: (1000).microAlgos(),
           }),
-        ).rejects.toThrow("Unknown wormhole core");
+        ).rejects.toThrow("Incorrect app call id");
       });
 
       test("fails when verify vaa call isn't a noop", async () => {
@@ -424,7 +424,7 @@ describe("WormholeTransceiver", () => {
             boxReferences: [getWormholePeersBoxKey(PEER_CHAIN_ID), getVAAsConsumedBoxKey(vaaDigest)],
             extraFee: (1000).microAlgos(),
           }),
-        ).rejects.toThrow("Incorrect app on completion");
+        ).rejects.toThrow("Incorrect app call on completion");
       });
 
       test("fails when verify vaa call isn't verifyVAA", async () => {
@@ -444,7 +444,7 @@ describe("WormholeTransceiver", () => {
             boxReferences: [getWormholePeersBoxKey(PEER_CHAIN_ID)],
             extraFee: (1000).microAlgos(),
           }),
-        ).rejects.toThrow("Incorrect method");
+        ).rejects.toThrow("Incorrect app call method");
       });
 
       test("fails when payload doesn't have correct prefix", async () => {
@@ -536,7 +536,7 @@ describe("WormholeTransceiver", () => {
             boxReferences: [getWormholePeersBoxKey(PEER_CHAIN_ID), getVAAsConsumedBoxKey(vaaDigest)],
             extraFee: (1000).microAlgos(),
           }),
-        ).rejects.toThrow("Emitter address mismatch");
+        ).rejects.toThrow("Unknown peer address");
       });
 
       test("succeeds and delivers message to transceiver manager", async () => {

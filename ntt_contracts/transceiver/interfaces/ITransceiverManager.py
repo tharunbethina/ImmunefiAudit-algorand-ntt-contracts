@@ -2,7 +2,16 @@ from abc import ABC, abstractmethod
 from algopy import ARC4Contract, UInt64, gtxn
 from algopy.arc4 import Address, Bool, DynamicArray, Struct, abimethod
 
-from ...types import ARC4UInt16, ARC4UInt64, Bytes32, TransceiverInstructions, MessageToSend, MessageReceived
+from ...types import (
+    ARC4UInt16,
+    ARC4UInt64,
+    MessageDigest,
+    MessageId,
+    MessageReceived,
+    MessageToSend,
+    TransceiverInstructions,
+    UniversalAddress,
+)
 
 
 # Events
@@ -21,14 +30,14 @@ class TransceiverRemoved(Struct):
 class MessageSent(Struct):
     message_handler: ARC4UInt64
     transceiver: ARC4UInt64
-    message_id: Bytes32
+    message_id: MessageId
 
 class AttestationReceived(Struct):
-    message_id: Bytes32
+    message_id: MessageId
     source_chain_id: ARC4UInt16
-    source_address: Bytes32
+    source_address: UniversalAddress
     message_handler: ARC4UInt64
-    message_digest: Bytes32
+    message_digest: MessageDigest
     num_attestations: ARC4UInt64
 
 
@@ -136,7 +145,7 @@ class ITransceiverManager(ARC4Contract, ABC):
 
     @abstractmethod
     @abimethod(readonly=True)
-    def message_attestations(self, message_digest: Bytes32) -> UInt64:
+    def message_attestations(self, message_digest: MessageDigest) -> UInt64:
         """The number of attestations the given message has received.
 
          Args:
@@ -149,7 +158,7 @@ class ITransceiverManager(ARC4Contract, ABC):
 
     @abstractmethod
     @abimethod(readonly=True)
-    def has_transceiver_attested(self, message_digest: Bytes32, transceiver: UInt64) -> Bool:
+    def has_transceiver_attested(self, message_digest: MessageDigest, transceiver: UInt64) -> Bool:
         """Returns whether the transceiver has attested to the message
 
          Args:
@@ -163,7 +172,7 @@ class ITransceiverManager(ARC4Contract, ABC):
 
     @abstractmethod
     @abimethod(readonly=True)
-    def calculate_message_digest(self, message: MessageReceived) -> Bytes32:
+    def calculate_message_digest(self, message: MessageReceived) -> MessageDigest:
         """Calculate a unique identifier of the message received by taking a hash of its bytes.
 
         Note that this is different from the `message.id`. The `message.id` is user defined so offers no guarantees.

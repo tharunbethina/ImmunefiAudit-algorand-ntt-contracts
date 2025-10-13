@@ -2,22 +2,24 @@ from algopy import Account, BoxMap, Bytes, GlobalState, Global, OnCompleteAction
 from algopy.arc4 import Address, Bool, Struct, UInt16, abimethod, emit
 
 from folks_contracts.library.extensions.InitialisableWithCreator import InitialisableWithCreator
-from ..types import Bytes16, Bytes32, MessageReceived, MessageToSend
+from .. import constants as const, errors as err
+from ..types import Bytes16, MessageId, MessageReceived, MessageToSend, UniversalAddress, VaaDigest
 from .Transceiver import Transceiver
 
 
 # Constants
 WH_TRANSCEIVER_PAYLOAD_PREFIX = "9945FF10"
+SIGNATURE_LENGTH = 66
 
 
 # Events
 class WormholePeerSet(Struct):
     peer_chain_id: UInt16
-    peer_contract_address: Bytes32
+    peer_contract_address: UniversalAddress
 
 class ReceivedMessage(Struct):
-    vaa_digest: Bytes32
-    message_id: Bytes32
+    vaa_digest: VaaDigest
+    message_id: MessageId
 
 
 class WormholeTransceiver(Transceiver, InitialisableWithCreator):
@@ -34,19 +36,20 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
 
         # wormhole source chain constants
         self.wormhole_core = GlobalState(UInt64)
-        self.chain_id = GlobalState(UInt64)
+        self.chain_id = GlobalState(UInt16)
         self.emitter_lsig = GlobalState(Address)
 
-        # messaging
-        self.wormhole_peers = BoxMap(UInt16, Bytes32, key_prefix=b"wormhole_peer_")
-        self.vaas_consumed = BoxMap(Bytes32, Bool, key_prefix=b"vaas_consumed_")
+        # wormhole chain id -> peer address
+        self.wormhole_peers = BoxMap(UInt16, UniversalAddress, key_prefix=b"wormhole_peer_")
+        # vaa digest -> whether it has been consumed
+        self.vaas_consumed = BoxMap(VaaDigest, Bool, key_prefix=b"vaas_consumed_")
 
     @abimethod(create="require")
     def create( # type: ignore[override]
         self,
         transceiver_manager: UInt64,
         wormhole_core: UInt64,
-        chain_id: UInt64,
+        chain_id: UInt16,
         min_upgrade_delay: UInt64
     ) -> None:
         Transceiver.create(self, transceiver_manager, min_upgrade_delay)
@@ -69,7 +72,7 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
         return String("wormhole")
 
     @abimethod
-    def set_wormhole_peer(self, peer_chain_id: UInt16, peer_contract_address: Bytes32) -> None:
+    def set_wormhole_peer(self, peer_chain_id: UInt16, peer_contract_address: UniversalAddress) -> None:
         """Set the WormholeTransceiver on a peer chain, overriding if needed.
 
          Args:
@@ -79,7 +82,7 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
         self._only_initialised()
         self._check_sender_role(self.manager_role())
 
-        assert peer_chain_id != self.chain_id.value, "Cannot set itself as peer chain"
+        assert peer_chain_id != self.chain_id.value, err.PEER_CANNOT_BE_ITSELF
 
         # set peer (overriding if needed)
         self.wormhole_peers[peer_chain_id] = peer_contract_address.copy()
@@ -95,24 +98,24 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
         self._only_initialised()
 
         # check message has been verified
-        assert verify_vaa.app_id.id == self.wormhole_core.value, "Unknown wormhole core"
-        assert verify_vaa.on_completion == OnCompleteAction.NoOp, "Incorrect app on completion"
-        assert verify_vaa.app_args(0) == Bytes(b"verifyVAA"), "Incorrect method"
+        assert verify_vaa.app_id.id == self.wormhole_core.value, err.APP_CALL_ID_INCORRECT
+        assert verify_vaa.on_completion == OnCompleteAction.NoOp, err.APP_CALL_ON_COMPLETION_INCORRECT
+        assert verify_vaa.app_args(0) == Bytes(b"verifyVAA"), err.APP_CALL_METHOD_INCORRECT
 
         # header
-        index = UInt64(5) # skip version and guardian_set_index
-        num_sigs = op.btoi(op.extract(verify_vaa.app_args(1), 5, 1))
-        index += 1 + num_sigs * 66 # skip signatures
+        index = UInt64(const.BYTE_LENGTH + const.UINT32_LENGTH) # skip version and guardian_set_index
+        num_sigs = op.btoi(op.extract(verify_vaa.app_args(1), index, const.UINT8_LENGTH))
+        index += const.UINT8_LENGTH + num_sigs * SIGNATURE_LENGTH # skip signatures
 
         # body
-        vaa_digest = Bytes32.from_bytes(
+        vaa_digest = VaaDigest.from_bytes(
             op.keccak256(op.keccak256(op.substring(verify_vaa.app_args(1), index, verify_vaa.app_args(1).length)))
         )
-        index += 8 # skip timestamp and nonce
+        index += const.UINT32_LENGTH + const.UINT32_LENGTH # skip timestamp and nonce
         emitter_chain_id = UInt16(op.extract_uint16(verify_vaa.app_args(1), index))
-        index += 2
-        emitter_address = Bytes32.from_bytes(op.extract(verify_vaa.app_args(1), index, 32))
-        index += 41 # skip sequence and consistency_level
+        index += const.UINT16_LENGTH
+        emitter_address = UniversalAddress.from_bytes(op.extract(verify_vaa.app_args(1), index, const.BYTES32_LENGTH))
+        index += const.BYTES32_LENGTH + const.UINT64_LENGTH + const.UINT8_LENGTH # skip sequence and consistency_level
         payload = op.substring(verify_vaa.app_args(1), index, verify_vaa.app_args(1).length)
 
         # decode payload, check emitter is known, prevent replays and forward to handler
@@ -120,16 +123,16 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
 
     @abimethod(readonly=True)
     def manager_role(self) -> Bytes16:
-        return Bytes16.from_bytes(op.extract(op.keccak256(b"MANAGER"), 0, 16))
+        return Bytes16.from_bytes(op.extract(op.keccak256(b"MANAGER"), 0, const.BYTES16_LENGTH))
 
     @abimethod(readonly=True)
-    def get_wormhole_peer(self, peer_chain_id: UInt16) -> Bytes32:
+    def get_wormhole_peer(self, peer_chain_id: UInt16) -> UniversalAddress:
         """Get the address of the peer WormholeTransceiver set on a given chain.
 
         Args:
              peer_chain_id: The peer chain to get the address of
         """
-        assert peer_chain_id in self.wormhole_peers, "Unknown peer chain"
+        assert peer_chain_id in self.wormhole_peers, err.PEER_CHAIN_UNKNOWN
         return self.wormhole_peers[peer_chain_id]
 
     @subroutine
@@ -137,33 +140,33 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
         self,
         payload: Bytes,
         emitter_chain_id: UInt16,
-        emitter_address: Bytes32,
-        vaa_digest: Bytes32,
+        emitter_address: UniversalAddress,
+        vaa_digest: VaaDigest,
     ) -> None:
         index = UInt64(0)
-        assert Bytes.from_hex(WH_TRANSCEIVER_PAYLOAD_PREFIX) == op.extract(payload, index, 4), "Incorrect prefix"
-        index += 4
-        source_address = Bytes32.from_bytes(op.extract(payload, index, 32))
-        index += 32
-        handler_address = Bytes32.from_bytes(op.extract(payload, index, 32))
-        index += 32
+        assert Bytes.from_hex(WH_TRANSCEIVER_PAYLOAD_PREFIX) == op.extract(payload, index, const.BYTES4_LENGTH), err.PREFIX_INCORRECT
+        index += const.BYTES4_LENGTH
+        source_address = UniversalAddress.from_bytes(op.extract(payload, index, const.BYTES32_LENGTH))
+        index += const.BYTES32_LENGTH
+        handler_address = UniversalAddress.from_bytes(op.extract(payload, index, const.BYTES32_LENGTH))
+        index += const.BYTES32_LENGTH
         handler_payload_length = op.extract_uint16(payload, index)
-        index += 2
+        index += const.UINT16_LENGTH
         handler_payload = op.substring(payload, index, index + handler_payload_length)
         # transceiver_payload_length and transceiver_payload are ignored
 
         # check message comes from peer
-        assert emitter_address == self.get_wormhole_peer(emitter_chain_id), "Emitter address mismatch"
+        assert emitter_address == self.get_wormhole_peer(emitter_chain_id), err.PEER_ADDRESS_UNKNOWN
 
         # save the vaa digest in storage to protect against replay attacks
         self._set_vaa_consumed(vaa_digest)
 
         # parse handler payload
         index = UInt64(0)
-        message_id = Bytes32.from_bytes(op.extract(handler_payload, index, 32))
-        index += 32
-        message_user_address = Bytes32.from_bytes(op.extract(handler_payload, index, 32))
-        index += 32
+        message_id = MessageId.from_bytes(op.extract(handler_payload, index, const.BYTES32_LENGTH))
+        index += const.BYTES32_LENGTH
+        message_user_address = UniversalAddress.from_bytes(op.extract(handler_payload, index, const.BYTES32_LENGTH))
+        index += const.BYTES32_LENGTH
         message_payload = op.substring(handler_payload, index, handler_payload.length)
 
         # deliver message to TransceiverManager
@@ -209,7 +212,7 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
 
         # publish message
         wormhole_core_address, exists = op.AppParamsGet.app_address(self.wormhole_core.value)
-        assert exists, "Wormhole Core address unknown"
+        assert exists, err.WORMHOLE_CORE_ADDRESS_UNKNOWN
 
         payment = itxn.Payment(receiver=wormhole_core_address, amount=total_fee, fee=0)
         app_call = itxn.ApplicationCall(
@@ -223,18 +226,18 @@ class WormholeTransceiver(Transceiver, InitialisableWithCreator):
     @subroutine
     def _get_wormhole_core_message_fee(self) -> UInt64:
         message_fee, exists = op.AppGlobal.get_ex_uint64(self.wormhole_core.value, Bytes(b"MessageFee"))
-        assert exists, "Wormhole message fee is unknown"
+        assert exists, err.WORMHOLE_MESSAGE_FEE_UNKNOWN
         return message_fee
 
     @subroutine
-    def _set_vaa_consumed(self, vaa_digest: Bytes32) -> None:
-        assert not (Bool(vaa_digest in self.vaas_consumed) and self.vaas_consumed[vaa_digest]), "VAA already seen"
+    def _set_vaa_consumed(self, vaa_digest: VaaDigest) -> None:
+        assert not (Bool(vaa_digest in self.vaas_consumed) and self.vaas_consumed[vaa_digest]), err.VAA_ALREADY_SEEN
         self.vaas_consumed[vaa_digest] = Bool(True)
 
     @subroutine
     def _calculate_emitter_lsig(self) -> Address:
         wormhole_core_address, exists = op.AppParamsGet.app_address(self.wormhole_core.value)
-        assert exists, "WormholeCore address unknown"
+        assert exists, err.WORMHOLE_CORE_ADDRESS_UNKNOWN
 
         return Address.from_bytes(op.sha512_256(
             Bytes(b"Program") +

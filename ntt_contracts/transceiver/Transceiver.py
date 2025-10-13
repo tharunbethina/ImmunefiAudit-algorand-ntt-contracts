@@ -3,6 +3,7 @@ from algopy import Bytes, Global, GlobalState, Txn, UInt64, gtxn, op, subroutine
 from algopy.arc4 import Struct, abi_call, abimethod, emit
 
 from folks_contracts.library.Upgradeable import Upgradeable
+from .. import errors as err
 from ..types import Bytes32, MessageReceived, MessageToSend
 from .interfaces.ITransceiverManager import ITransceiverManager
 from .interfaces.ITransceiver import ITransceiver
@@ -42,12 +43,12 @@ class Transceiver(ITransceiver, Upgradeable, ABC):
     ) -> None:
         # check caller is TransceiverManager
         transceiver_manager_address, exists = op.AppParamsGet.app_address(self.transceiver_manager.value)
-        assert exists, "TransceiverManager address unknown"
-        assert transceiver_manager_address == Txn.sender, "Caller must be TransceiverManager"
+        assert exists, err.TRANSCEIVER_MANAGER_ADDRESS_UNKNOWN
+        assert transceiver_manager_address == Txn.sender, err.TRANSCEIVER_MANAGER_CALLER
 
         # check payment
-        assert fee_payment.receiver == Global.current_application_address, "Unknown fee payment receiver"
-        assert fee_payment.amount == self._quote_delivery_price(message, transceiver_instruction), "Incorrect fee payment"
+        assert fee_payment.receiver == Global.current_application_address, err.FEE_PAYMENT_RECEIVER_UNKNOWN
+        assert fee_payment.amount == self._quote_delivery_price(message, transceiver_instruction), err.FEE_PAYMENT_AMOUNT_INCORRECT
 
         # send message according to concrete transceiver implementation
         self._send_message(fee_payment.amount, message, transceiver_instruction)

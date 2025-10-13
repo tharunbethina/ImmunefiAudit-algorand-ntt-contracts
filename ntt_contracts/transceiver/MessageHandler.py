@@ -2,7 +2,8 @@ from abc import ABC, abstractmethod
 from algopy import ARC4Contract, BoxMap, Global, GlobalState, UInt64, itxn, op, subroutine
 from algopy.arc4 import Address, Bool, Struct, abi_call, abimethod, emit
 
-from ..types import ARC4UInt64, Bytes32, TransceiverInstructions, MessageToSend, MessageReceived
+from .. import errors as err
+from ..types import ARC4UInt64, MessageDigest, MessageReceived, MessageToSend, TransceiverInstructions
 from .interfaces.ITransceiverManager import ITransceiverManager
 
 
@@ -23,7 +24,9 @@ class MessageHandler(ARC4Contract, ABC):
     def __init__(self) -> None:
         self.transceiver_manager = GlobalState(UInt64)
         self.threshold = GlobalState(UInt64)
-        self.messages_executed = BoxMap(Bytes32, Bool, key_prefix=b"messages_executed_")
+
+        # message digest -> whether it has been executed
+        self.messages_executed = BoxMap(MessageDigest, Bool, key_prefix=b"messages_executed_")
 
     @abimethod(create="require")
     def create(self, threshold: UInt64) -> None:
@@ -49,20 +52,20 @@ class MessageHandler(ARC4Contract, ABC):
         )
 
         # check if handler is correct
-        assert Address(message.handler_address.bytes) == Global.current_application_address, "Handler address mismatch"
+        assert Address(message.handler_address.bytes) == Global.current_application_address, err.MESSAGE_HANDLER_ADDRESS_MISMATCH
 
         # check if required attestations have been met
-        assert self.is_message_approved(message_digest), "Message not approved"
+        assert self.is_message_approved(message_digest), err.MESSAGE_NOT_APPROVED
 
         # protect against replay attacks
-        assert not self.is_message_executed(message_digest), "Message already executed"
+        assert not self.is_message_executed(message_digest), err.MESSAGE_ALREADY_EXECUTED
         self.messages_executed[message_digest] = Bool(True)
 
         # handle message
         self._handle_message(message_digest, message)
 
     @abimethod(readonly=True)
-    def is_message_approved(self, message_digest: Bytes32) -> Bool:
+    def is_message_approved(self, message_digest: MessageDigest) -> Bool:
         """Returns whether a message has been approved.
 
         Args:
@@ -77,7 +80,7 @@ class MessageHandler(ARC4Contract, ABC):
         return Bool(message_attestations > 0 and message_attestations >= self.threshold.value)
 
     @abimethod(readonly=True)
-    def is_message_executed(self, message_digest: Bytes32) -> Bool:
+    def is_message_executed(self, message_digest: MessageDigest) -> Bool:
         """Returns whether a message has been executed.
 
         Note that a message can be executed without being approved if the threshold is increased after execution.
@@ -124,7 +127,7 @@ class MessageHandler(ARC4Contract, ABC):
         Args:
             new_threshold: The new threshold
         """
-        assert new_threshold, "Cannot set zero threshold"
+        assert new_threshold, err.ZERO_THRESHOLD
         self.threshold.value = new_threshold
         emit(ThresholdUpdated(ARC4UInt64(new_threshold)))
 
@@ -154,7 +157,7 @@ class MessageHandler(ARC4Contract, ABC):
 
         # send message
         transceiver_manager_address, exists = op.AppParamsGet.app_address(self.transceiver_manager.value)
-        assert exists, "TransceiverManager address unknown"
+        assert exists, err.TRANSCEIVER_MANAGER_ADDRESS_UNKNOWN
         abi_call(
             ITransceiverManager.send_message_to_transceivers,
             itxn.Payment(amount=total_delivery_price, receiver=transceiver_manager_address, fee=0),
@@ -169,7 +172,7 @@ class MessageHandler(ARC4Contract, ABC):
 
     @abstractmethod
     @subroutine
-    def _handle_message(self, message_digest: Bytes32, message: MessageReceived) -> None:
+    def _handle_message(self, message_digest: MessageDigest, message: MessageReceived) -> None:
         """Implement this method with custom logic needed to carry out message execution.
 
         It is assumed the correct message digest is passed for the given message.
