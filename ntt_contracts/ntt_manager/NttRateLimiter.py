@@ -5,7 +5,19 @@ from typing import Tuple
 from folks_contracts.library.extensions.InitialisableWithCreator import InitialisableWithCreator
 from folks_contracts.library.AccessControl import AccessControl
 from folks_contracts.library.RateLimiter import RateLimiter
-from ..types import ARC4UInt16, ARC4UInt64, ARC4UInt256, Bytes16, Bytes32, TrimmedAmount, TransceiverInstructions
+from .. import constants as const, errors as err
+from ..types import (
+    ARC4UInt16,
+    ARC4UInt64,
+    ARC4UInt256,
+    Bytes16,
+    Bytes32,
+    MessageDigest,
+    MessageId,
+    TransceiverInstructions,
+    TrimmedAmount,
+    UniversalAddress
+)
 
 
 # Structs
@@ -13,7 +25,7 @@ class OutboundQueuedTransfer(Struct, frozen=True):
     timestamp: ARC4UInt64
     amount: TrimmedAmount
     recipient_chain: ARC4UInt16
-    recipient: Bytes32
+    recipient: UniversalAddress
     sender: Address
     transceiver_instructions: TransceiverInstructions
 
@@ -27,21 +39,21 @@ class InboundQueuedTransfer(Struct, frozen=True):
 # Events
 class OutboundTransferRateLimited(Struct):
     sender: Address
-    message_id: Bytes32
+    message_id: MessageId
     current_capacity: ARC4UInt256
     amount: ARC4UInt64
 
 class InboundTransferRateLimited(Struct):
     sender: Address
-    message_digest: Bytes32
+    message_digest: MessageDigest
     current_capacity: ARC4UInt256
     amount: ARC4UInt64
 
 class OutboundTransferDeleted(Struct):
-    message_id: Bytes32
+    message_id: MessageId
 
 class InboundTransferDeleted(Struct):
-    message_digest: Bytes32
+    message_digest: MessageDigest
 
 
 class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
@@ -51,9 +63,9 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         InitialisableWithCreator.__init__(self)
 
         # message id -> outbound queued transfer
-        self.outbound_queued_transfers = BoxMap(Bytes32, OutboundQueuedTransfer, key_prefix=b"outbound_queued_transfers_")
+        self.outbound_queued_transfers = BoxMap(MessageId, OutboundQueuedTransfer, key_prefix=b"outbound_queued_transfers_")
         # message digest -> inbound queued transfer
-        self.inbound_queued_transfers = BoxMap(Bytes32, InboundQueuedTransfer, key_prefix=b"inbound_queued_transfers_")
+        self.inbound_queued_transfers = BoxMap(MessageDigest, InboundQueuedTransfer, key_prefix=b"inbound_queued_transfers_")
 
     @abimethod
     def initialise(self, admin: Address) -> None:  # type: ignore[override]
@@ -124,7 +136,7 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         return self.get_current_capacity(self.outbound_bucket_id())
 
     @abimethod(readonly=True)
-    def get_outbound_queued_transfer(self, message_id: Bytes32) -> Tuple[Bool, OutboundQueuedTransfer]:
+    def get_outbound_queued_transfer(self, message_id: MessageId) -> Tuple[Bool, OutboundQueuedTransfer]:
         """Get the details of an outbound queued transfer.
 
         Args:
@@ -138,7 +150,7 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         outbound_queued_transfer = self.outbound_queued_transfers[message_id].copy()
 
         # include whether sufficient time has passed
-        delta = Global.latest_timestamp - outbound_queued_transfer.timestamp.native
+        delta = Global.latest_timestamp - outbound_queued_transfer.timestamp.as_uint64()
         can_complete = delta >= self.get_rate_duration(self.outbound_bucket_id())
 
         return Bool(can_complete), outbound_queued_transfer.copy()
@@ -153,7 +165,7 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         return self.get_current_capacity(self.inbound_bucket_id(chain_id))
 
     @abimethod(readonly=True)
-    def get_inbound_queued_transfer(self, message_digest: Bytes32) -> Tuple[Bool, InboundQueuedTransfer]:
+    def get_inbound_queued_transfer(self, message_digest: MessageDigest) -> Tuple[Bool, InboundQueuedTransfer]:
         """Get the details of an inbound queued transfer.
 
         Args:
@@ -167,7 +179,7 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         inbound_queued_transfer = self.inbound_queued_transfers[message_digest]
 
         # include whether sufficient time has passed
-        delta = Global.latest_timestamp - inbound_queued_transfer.timestamp.native
+        delta = Global.latest_timestamp - inbound_queued_transfer.timestamp.as_uint64()
         can_complete = delta >= self.get_rate_duration(self.inbound_bucket_id(inbound_queued_transfer.source_chain))
 
         return Bool(can_complete), inbound_queued_transfer
@@ -182,18 +194,18 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
 
     @abimethod(readonly=True)
     def rate_limiter_manager_role(self) -> Bytes16:
-        return Bytes16.from_bytes(op.extract(op.keccak256(b"RATE_LIMITER_MANAGER"), 0, 16))
+        return Bytes16.from_bytes(op.extract(op.keccak256(b"RATE_LIMITER_MANAGER"), 0, const.BYTES16_LENGTH))
 
     @subroutine(inline=False)
     def _enqueue_or_consume_outbound_transfer(
         self,
         untrimmed_amount: UInt64,
         recipient_chain: UInt16,
-        recipient: Bytes32,
+        recipient: UniversalAddress,
         should_queue: Bool,
         transceiver_instructions: TransceiverInstructions,
         trimmed_amount: TrimmedAmount,
-        message_id: Bytes32,
+        message_id: MessageId,
     ) -> Bool:
         """If there is insufficient capacity and can be queued then enqueue the transfer to the outbound queue. If there
          is sufficient capacity then consume from the outbound bucket.
@@ -212,7 +224,7 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         """
         # check rate limit
         has_capacity = self.has_capacity(self.outbound_bucket_id(), UInt256(untrimmed_amount))
-        assert should_queue or has_capacity, "Not enough capacity"
+        assert should_queue or has_capacity, err.OUTBOUND_QUEUED_TRANSFER_INSUFFICIENT_CAPACITY
 
         # enqueue if needed
         if should_queue and not has_capacity:
@@ -248,7 +260,7 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         source_chain: UInt16,
         trimmed_amount: TrimmedAmount,
         recipient: Address,
-        message_digest: Bytes32,
+        message_digest: MessageDigest,
     ) -> Bool:
         """If there is insufficient capacity then enqueue the transfer to the inbound queue. If there is sufficient
         capacity then consume from the inbound bucket.
@@ -292,7 +304,7 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         return Bool(False)
 
     @subroutine
-    def _delete_outbound_transfer(self, message_id: Bytes32) -> None:
+    def _delete_outbound_transfer(self, message_id: MessageId) -> None:
         """Deletes an outbound transfer from the queue.
 
          Args:
@@ -303,7 +315,7 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         emit(OutboundTransferDeleted(message_id))
 
     @subroutine
-    def _delete_inbound_transfer(self, message_digest: Bytes32) -> None:
+    def _delete_inbound_transfer(self, message_digest: MessageDigest) -> None:
         """Deletes an inbound transfer from the queue.
 
          Args:
@@ -314,9 +326,9 @@ class NttRateLimiter(RateLimiter, AccessControl, InitialisableWithCreator):
         emit(InboundTransferDeleted(message_digest))
 
     @subroutine
-    def _check_outbound_queued_transfer_known(self, message_id: Bytes32) -> None:
-        assert message_id in self.outbound_queued_transfers, "Unknown outbound queued transfer"
+    def _check_outbound_queued_transfer_known(self, message_id: MessageId) -> None:
+        assert message_id in self.outbound_queued_transfers, err.OUTBOUND_QUEUED_TRANSFER_UNKNOWN
 
     @subroutine
-    def _check_inbound_queued_transfer_known(self, message_digest: Bytes32) -> None:
-        assert message_digest in self.inbound_queued_transfers, "Unknown inbound queued transfer"
+    def _check_inbound_queued_transfer_known(self, message_digest: MessageDigest) -> None:
+        assert message_digest in self.inbound_queued_transfers, err.INBOUND_QUEUED_TRANSFER_UNKNOWN

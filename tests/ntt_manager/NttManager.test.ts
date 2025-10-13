@@ -257,7 +257,7 @@ describe("NttManager", () => {
   });
 
   test("get ntt manager peer fails if chain unknown", async () => {
-    await expect(client.send.getNttManagerPeer({ args: [PEER_CHAIN_ID] })).rejects.toThrow("Unknown chain");
+    await expect(client.send.getNttManagerPeer({ args: [PEER_CHAIN_ID] })).rejects.toThrow("Unknown peer chain");
   });
 
   describe("when uninitialised", () => {
@@ -517,7 +517,7 @@ describe("NttManager", () => {
           args: [],
           boxReferences: [getRoleBoxKey(UNPAUSER_ROLE), getAddressRolesBoxKey(UNPAUSER_ROLE, unpauser.publicKey)],
         }),
-      ).rejects.toThrow("Not paused");
+      ).rejects.toThrow("Contract is not paused");
     });
 
     test("pause succeeds", async () => {
@@ -537,7 +537,7 @@ describe("NttManager", () => {
           args: [],
           boxReferences: [getRoleBoxKey(PAUSER_ROLE), getAddressRolesBoxKey(PAUSER_ROLE, pauser.publicKey)],
         }),
-      ).rejects.toThrow("Already paused");
+      ).rejects.toThrow("Contract is paused");
     });
 
     test("unpause succeeds", async () => {
@@ -1039,7 +1039,7 @@ describe("NttManager", () => {
           args: [feePaymentTxn, sendTokenTxn, assetAmount, SOURCE_CHAIN_ID, getRandomBytes(32)],
           boxReferences: [getNttManagerPeerBoxKey(SOURCE_CHAIN_ID)],
         }),
-      ).rejects.toThrow("Unknown chain");
+      ).rejects.toThrow("Unknown peer chain");
     });
 
     test("fails when transfer amount has dust", async () => {
@@ -1099,7 +1099,7 @@ describe("NttManager", () => {
             boxReferences: [getNttManagerPeerBoxKey(PEER_CHAIN_ID), outboundBucketId],
           })
           .send(),
-      ).rejects.toThrow("Not enough capacity");
+      ).rejects.toThrow("Insufficient capacity for outbound queued transfer");
     });
 
     test("fails when sufficient capacity but insufficient fee payment", async () => {
@@ -1139,7 +1139,7 @@ describe("NttManager", () => {
             extraFee: (3000).microAlgos(),
           })
           .send(),
-      ).rejects.toThrow("Insufficient fee payment");
+      ).rejects.toThrow("Insufficient fee payment amount");
     });
 
     test("succeeds when sufficient capacity and exact fee payment", async () => {
@@ -1496,7 +1496,7 @@ describe("NttManager", () => {
           args: [feePaymentTxn, sendTokenTxn, assetAmount, SOURCE_CHAIN_ID, getRandomBytes(32), false, []],
           boxReferences: [getNttManagerPeerBoxKey(SOURCE_CHAIN_ID)],
         }),
-      ).rejects.toThrow("Unknown chain");
+      ).rejects.toThrow("Unknown peer chain");
     });
 
     test("fails when transfer amount has dust", async () => {
@@ -1557,7 +1557,7 @@ describe("NttManager", () => {
             boxReferences: [getNttManagerPeerBoxKey(PEER_CHAIN_ID), getBucketBoxKey(outboundBucketId)],
           })
           .send(),
-      ).rejects.toThrow("Not enough capacity");
+      ).rejects.toThrow("Insufficient capacity for outbound queued transfer");
     });
 
     test("succeeds when insufficient capacity and can queue", async () => {
@@ -1704,7 +1704,7 @@ describe("NttManager", () => {
             extraFee: (3000).microAlgos(),
           })
           .send(),
-      ).rejects.toThrow("Insufficient fee payment");
+      ).rejects.toThrow("Insufficient fee payment amount");
     });
 
     test("succeeds when sufficient capacity and exact fee payment", async () => {
@@ -2090,7 +2090,7 @@ describe("NttManager", () => {
           boxReferences: [getOutboundQueuedTransfersBoxKey(queuedTransferMessageId)],
           extraFee: (3000).microAlgos(),
         }),
-      ).rejects.toThrow("Insufficient fee payment");
+      ).rejects.toThrow("Insufficient fee payment amount");
     });
 
     test("succeeds when exact fee payment", async () => {
@@ -2387,7 +2387,7 @@ describe("NttManager", () => {
           boxReferences: [getMessagesExecutedBoxKey(messageDigest)],
           extraFee: (2000).microAlgos(),
         }),
-      ).rejects.toThrow("Unknown chain");
+      ).rejects.toThrow("Unknown peer chain");
     });
 
     test("fails when peer address is unknown", async () => {
@@ -2415,7 +2415,7 @@ describe("NttManager", () => {
           boxReferences: [getMessagesExecutedBoxKey(messageDigest)],
           extraFee: (2000).microAlgos(),
         }),
-      ).rejects.toThrow("Peer address mismatch");
+      ).rejects.toThrow("Unknown peer address");
     });
 
     test("fails when invalid target chain", async () => {

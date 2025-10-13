@@ -2,6 +2,7 @@ from algopy import Bytes, Global, UInt64, gtxn, itxn, op
 from algopy.arc4 import Address, Bool, DynamicArray, UInt256, Struct, abi_call, abimethod, emit
 
 from folks_contracts.library import BytesUtils
+from ... import errors as err
 from ...types import ARC4UInt64, Bytes32, TransceiverInstructions, MessageToSend, MessageReceived
 from ..interfaces.ITransceiverManager import (
     ITransceiverManager,
@@ -104,7 +105,7 @@ class MockTransceiverManager(ITransceiverManager):
         transceiver_instruction: Bytes
     ) -> None:
         transceiver_address, exists = op.AppParamsGet.app_address(transceiver)
-        assert exists, "Transceiver address unknown"
+        assert exists, err.TRANSCEIVER_ADDRESS_UNKNOWN
 
         fee_payment_txn = itxn.Payment(amount=fee_amount, receiver=transceiver_address, fee=0)
         abi_call(

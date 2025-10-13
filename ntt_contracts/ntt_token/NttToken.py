@@ -4,6 +4,7 @@ from algopy.arc4 import Address, abimethod, emit
 
 from folks_contracts.library.extensions.InitialisableWithCreator import InitialisableWithCreator
 from folks_contracts.library.Upgradeable import Upgradeable
+from .. import constants as const
 from ..types import ARC4UInt64, Bytes16
 from .interfaces.INttToken import Minted, INttToken
 
@@ -42,4 +43,4 @@ class NttToken(INttToken, Upgradeable, InitialisableWithCreator, ABC):
 
     @abimethod(readonly=True)
     def minter_role(self) -> Bytes16:
-        return Bytes16.from_bytes(op.extract(op.keccak256(b"MINTER"), 0, 16))
+        return Bytes16.from_bytes(op.extract(op.keccak256(b"MINTER"), 0, const.BYTES16_LENGTH))

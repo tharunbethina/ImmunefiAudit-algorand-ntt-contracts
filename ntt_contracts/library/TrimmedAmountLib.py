@@ -21,9 +21,9 @@ def scale(amt: UInt64, from_decimals: UInt8, to_decimals: UInt8) -> UInt64:
     if from_decimals == to_decimals:
         return amt
     elif from_decimals > to_decimals:
-        return amt // (10 ** (from_decimals.native - to_decimals.native))
+        return amt // (10 ** (from_decimals.as_uint64() - to_decimals.as_uint64()))
     else:
-        return amt * (10 ** (to_decimals.native - from_decimals.native))
+        return amt * (10 ** (to_decimals.as_uint64() - from_decimals.as_uint64()))
 
 @subroutine
 def trim(amt: UInt64, from_decimals: UInt8, to_decimals: UInt8) -> TrimmedAmount:
@@ -50,4 +50,4 @@ def untrim(amt: TrimmedAmount, to_decimals: UInt8) -> UInt64:
     Raises:
         OverflowError: If the raw integer overflows
     """
-    return scale(amt.amount.native, amt.decimals, to_decimals)
+    return scale(amt.amount.as_uint64(), amt.decimals, to_decimals)

@@ -259,7 +259,7 @@ describe("MessageHandler", () => {
           boxReferences: [getMessagesExecutedBoxKey(MESSAGE_DIGEST)],
           extraFee: (2000).microAlgos(),
         }),
-      ).rejects.toThrow("Handler address mismatch");
+      ).rejects.toThrow("Message handler address mismatch");
     });
 
     test("fails when message not approved", async () => {

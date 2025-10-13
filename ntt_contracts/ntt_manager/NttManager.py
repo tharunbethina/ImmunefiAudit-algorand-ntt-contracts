@@ -3,6 +3,7 @@ from algopy.arc4 import Address, Bool, Struct, UInt8, UInt16, UInt256, abi_call,
 
 from folks_contracts.library import BytesUtils
 from folks_contracts.library.Upgradeable import Upgradeable
+from .. import constants as const, errors as err
 from ..library import TrimmedAmountLib
 from ..ntt_token.interfaces.INttToken import INttToken
 from ..transceiver.MessageHandler import MessageHandler
@@ -11,11 +12,13 @@ from ..types import (
     ARC4UInt16,
     ARC4UInt64,
     Bytes16,
-    Bytes32,
-    TrimmedAmount,
-    TransceiverInstructions,
+    MessageDigest,
+    MessageId,
+    MessageReceived,
     MessageToSend,
-    MessageReceived
+    TransceiverInstructions,
+    TrimmedAmount,
+    UniversalAddress,
 )
 from .interfaces.INttManager import INttManager, NttManagerPeer
 from .NttRateLimiter import NttRateLimiter
@@ -34,13 +37,13 @@ class TransceiverManagerUpdated(Struct):
 
 class NttManagerPeerSet(Struct):
     peer_chain_id: ARC4UInt16
-    peer_contract: Bytes32
+    peer_contract: UniversalAddress
     peer_decimals: ARC4UInt8
     is_new: Bool
 
 class TransferSent(Struct):
-    message_id: Bytes32
-    recipient: Bytes32
+    message_id: MessageId
+    recipient: UniversalAddress
     recipient_chain: ARC4UInt16
     amount: ARC4UInt64
     fee: ARC4UInt64
@@ -60,13 +63,13 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
 
         # for messages
         self.message_sequence = UInt64(0)
-        self.chain_id = GlobalState(UInt64)
+        self.chain_id = GlobalState(UInt16)
 
         # peer chain id -> peer chain
         self.ntt_manager_peers = BoxMap(UInt16, NttManagerPeer, key_prefix=b"ntt_manager_peer_")
 
     @abimethod(create="require")
-    def create(self, ntt_token: UInt64, chain_id: UInt64, threshold: UInt64, min_upgrade_delay: UInt64) -> None: # type: ignore[override]
+    def create(self, ntt_token: UInt64, chain_id: UInt16, threshold: UInt64, min_upgrade_delay: UInt64) -> None: # type: ignore[override]
         MessageHandler.create(self, threshold)
         Upgradeable.create(self, min_upgrade_delay)
 
@@ -95,7 +98,7 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         self._only_initialised()
         self._check_sender_role(self.pauser_role())
 
-        assert not self.is_paused, "Already paused"
+        self._check_is_not_paused()
 
         # set whether paused or not
         self.is_paused = True
@@ -107,7 +110,7 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         self._only_initialised()
         self._check_sender_role(self.unpauser_role())
 
-        assert self.is_paused, "Not paused"
+        self._check_is_paused()
 
         # set whether paused or not
         self.is_paused = False
@@ -131,13 +134,18 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         self._set_threshold(new_threshold)
 
     @abimethod
-    def set_ntt_manager_peer(self, peer_chain_id: UInt16, peer_contract: Bytes32, peer_decimals: UInt8) -> None:
+    def set_ntt_manager_peer(
+        self,
+        peer_chain_id: UInt16,
+        peer_contract: UniversalAddress,
+        peer_decimals: UInt8
+    ) -> None:
         self._only_initialised()
         self._check_sender_role(self.ntt_manager_admin_role())
 
         # check peer chain is valid
-        assert peer_chain_id != self.chain_id.value, "Cannot set itself as peer chain"
-        assert peer_decimals.native, "Invalid peer decimals"
+        assert peer_chain_id != self.chain_id.value, err.PEER_CANNOT_BE_ITSELF
+        assert peer_decimals.as_uint64(), err.PEER_DECIMALS_INVALID
 
         # if new chain, create unlimited inbound bucket
         is_new = Bool(peer_chain_id not in self.ntt_manager_peers)
@@ -155,8 +163,8 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         send_token: gtxn.AssetTransferTransaction,
         amount: UInt64,
         recipient_chain: UInt16,
-        recipient: Bytes32
-    ) -> Bytes32:
+        recipient: UniversalAddress
+    ) -> MessageId:
         return self._transfer_entry_point(
             fee_payment,
             send_token,
@@ -174,10 +182,10 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         send_token: gtxn.AssetTransferTransaction,
         amount: UInt64,
         recipient_chain: UInt16,
-        recipient: Bytes32,
+        recipient: UniversalAddress,
         should_queue: Bool,
         transceiver_instructions: TransceiverInstructions,
-    ) -> Bytes32:
+    ) -> MessageId:
         return self._transfer_entry_point(
             fee_payment,
             send_token,
@@ -189,13 +197,17 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         )
 
     @abimethod
-    def complete_outbound_queued_transfer(self, fee_payment: gtxn.PaymentTransaction, message_id: Bytes32) -> Bytes32:
+    def complete_outbound_queued_transfer(
+        self,
+        fee_payment: gtxn.PaymentTransaction,
+        message_id: MessageId,
+    ) -> MessageId:
         self._only_initialised()
         self._check_is_not_paused()
 
         # find the message in the queue and ensure that sufficient time has elapsed
         can_complete, outbound_queued_transfer = self.get_outbound_queued_transfer(message_id)
-        assert can_complete, "Outbound queued transfer is still queued"
+        assert can_complete, err.OUTBOUND_QUEUED_TRANSFER_STILL_QUEUED
 
         # remove transfer from the queue
         self._delete_outbound_transfer(message_id)
@@ -217,7 +229,7 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         return message_id
 
     @abimethod
-    def cancel_outbound_queued_transfer(self, message_id: Bytes32) -> None:
+    def cancel_outbound_queued_transfer(self, message_id: MessageId) -> None:
         self._only_initialised()
         self._check_is_not_paused()
 
@@ -225,7 +237,7 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         outbound_queued_transfer = self.get_outbound_queued_transfer(message_id)[1]
 
         # check sender initiated the transfer
-        assert Address(Txn.sender) == outbound_queued_transfer.sender, "Canceller is not original sender"
+        assert Address(Txn.sender) == outbound_queued_transfer.sender, err.ONLY_ORIGINAL_SENDER_CAN_CANCEL
 
         # remove transfer from the queue
         self._delete_outbound_transfer(message_id)
@@ -238,13 +250,13 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         self._refund_min_balance_to_caller()
 
     @abimethod
-    def complete_inbound_queued_transfer(self, message_digest: Bytes32) -> None:
+    def complete_inbound_queued_transfer(self, message_digest: MessageDigest) -> None:
         self._only_initialised()
         self._check_is_not_paused()
 
         # find the message in the queue and ensure that sufficient time has elapsed
         can_complete, inbound_queued_transfer = self.get_inbound_queued_transfer(message_digest)
-        assert can_complete, "Inbound queued transfer is still queued"
+        assert can_complete, err.INBOUND_QUEUED_TRANSFER_STILL_QUEUED
 
         # remove transfer from the queue
         self._delete_inbound_transfer(message_digest)
@@ -258,29 +270,33 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
 
     @abimethod(readonly=True)
     def ntt_manager_admin_role(self) -> Bytes16:
-        return Bytes16.from_bytes(op.extract(op.keccak256(b"NTT_MANAGER_ADMIN"), 0, 16))
+        return Bytes16.from_bytes(op.extract(op.keccak256(b"NTT_MANAGER_ADMIN"), 0, const.BYTES16_LENGTH))
 
     @abimethod(readonly=True)
     def pauser_role(self) -> Bytes16:
-        return Bytes16.from_bytes(op.extract(op.keccak256(b"PAUSER"), 0, 16))
+        return Bytes16.from_bytes(op.extract(op.keccak256(b"PAUSER"), 0, const.BYTES16_LENGTH))
 
     @abimethod(readonly=True)
     def unpauser_role(self) -> Bytes16:
-        return Bytes16.from_bytes(op.extract(op.keccak256(b"UNPAUSER"), 0, 16))
+        return Bytes16.from_bytes(op.extract(op.keccak256(b"UNPAUSER"), 0, const.BYTES16_LENGTH))
 
     @abimethod(readonly=True)
     def get_ntt_manager_peer(self, chain_id: UInt16) -> NttManagerPeer:
-        assert chain_id in self.ntt_manager_peers, "Unknown chain"
+        assert chain_id in self.ntt_manager_peers, err.PEER_CHAIN_UNKNOWN
         return self.ntt_manager_peers[chain_id]
 
     @subroutine
     def _check_is_not_paused(self) -> None:
-        assert not self.is_paused, "Contract is paused"
+        assert not self.is_paused, err.CONTRACT_PAUSED
 
     @subroutine
-    def _use_message_id(self) -> Bytes32:
+    def _check_is_paused(self) -> None:
+        assert self.is_paused, err.CONTRACT_NOT_PAUSED
+
+    @subroutine
+    def _use_message_id(self) -> MessageId:
         self.message_sequence += 1
-        return Bytes32.from_bytes(op.keccak256(op.itob(self.message_sequence)))
+        return MessageId.from_bytes(op.keccak256(op.itob(self.message_sequence)))
 
     @subroutine(inline=False)
     def _transfer_entry_point(
@@ -289,26 +305,26 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         send_token: gtxn.AssetTransferTransaction,
         amount: UInt64,
         recipient_chain: UInt16,
-        recipient: Bytes32,
+        recipient: UniversalAddress,
         should_queue: Bool,
         transceiver_instructions: TransceiverInstructions,
-    ) -> Bytes32:
+    ) -> MessageId:
         self._only_initialised()
         self._check_is_not_paused()
 
         # check payment - amount is checked in _transfer subroutine
-        assert fee_payment.receiver == Global.current_application_address, "Unknown fee payment receiver"
+        assert fee_payment.receiver == Global.current_application_address, err.FEE_PAYMENT_RECEIVER_UNKNOWN
 
         # check asset transfer
         ntt_token_address, exists = op.AppParamsGet.app_address(self.ntt_token.value)
-        assert exists, "Ntt token address unknown"
-        assert send_token.xfer_asset.id == self.asset_id.value, "Unknown asset"
-        assert send_token.asset_receiver == ntt_token_address, "Unknown asset receiver"
-        assert send_token.asset_amount == amount, "Incorrect asset amount"
+        assert exists, err.NTT_TOKEN_ADDRESS_UNKNOWN
+        assert send_token.xfer_asset.id == self.asset_id.value, err.ASSET_UNKNOWN
+        assert send_token.asset_receiver == ntt_token_address, err.ASSET_RECEIVER_UNKNOWN
+        assert send_token.asset_amount == amount, err.ASSET_AMOUNT_INCORRECT
 
         # check amount and recipient ain't zero
-        assert amount, "Cannot transfer zero amount"
-        assert recipient.bytes != op.bzero(32), "Invalid recipient address"
+        assert amount, err.ZERO_AMOUNT
+        assert recipient.bytes != op.bzero(const.BYTES32_LENGTH), err.RECIPIENT_INVALID
 
         # also checks if known recipient chain
         ntt_manager_peer = self.get_ntt_manager_peer(recipient_chain)
@@ -349,29 +365,29 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
     def _transfer(
         self,
         fee_payment: gtxn.PaymentTransaction,
-        message_id: Bytes32,
+        message_id: MessageId,
         trimmed_amount: TrimmedAmount,
         recipient_chain: UInt16,
-        recipient: Bytes32,
+        recipient: UniversalAddress,
         sender: Address,
         transceiver_instructions: TransceiverInstructions,
     ) -> None:
         # also checks if known recipient chain
         ntt_manager_peer = self.get_ntt_manager_peer(recipient_chain)
 
-        # construct message
+        # construct message by concatenating underlying bytes
         payload = (
             Bytes.from_hex(NTT_PAYLOAD_PREFIX) +
             trimmed_amount.decimals.bytes +
-            op.itob(trimmed_amount.amount.native) +
+            op.itob(trimmed_amount.amount.as_uint64()) +
             BytesUtils.convert_uint64_to_bytes32(self.asset_id.value).bytes +
             recipient.bytes +
             recipient_chain.bytes
         )
         message = MessageToSend(
             id=message_id.copy(),
-            user_address=Bytes32.from_bytes(sender.bytes),
-            source_address=Bytes32.from_bytes(Global.current_application_address.bytes),
+            user_address=UniversalAddress.from_bytes(sender.bytes),
+            source_address=UniversalAddress.from_bytes(Global.current_application_address.bytes),
             destination_chain_id=recipient_chain,
             handler_address=ntt_manager_peer.peer_contract.copy(),
             payload=payload,
@@ -381,8 +397,8 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         total_delivery_price = self._send_message(message, transceiver_instructions)
 
         # check fee payment and if applicable, refund excess
-        assert fee_payment.receiver == Global.current_application_address, "Unknown fee payment receiver"
-        assert fee_payment.amount >= total_delivery_price, "Insufficient fee payment"
+        assert fee_payment.receiver == Global.current_application_address, err.FEE_PAYMENT_RECEIVER_UNKNOWN
+        assert fee_payment.amount >= total_delivery_price, err.FEE_PAYMENT_AMOUNT_INSUFFICIENT
         excess_fee_payment = fee_payment.amount - total_delivery_price
         if excess_fee_payment:
             itxn.Payment(amount=excess_fee_payment, receiver=fee_payment.sender, fee=0).submit()
@@ -396,30 +412,30 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
         ))
 
     @subroutine
-    def _handle_message(self, message_digest: Bytes32, message: MessageReceived) -> None:
+    def _handle_message(self, message_digest: MessageDigest, message: MessageReceived) -> None:
         self._only_initialised()
         self._check_is_not_paused()
 
         # verify peer
         ntt_manager_peer = self.get_ntt_manager_peer(message.source_chain_id)
-        assert message.source_address == ntt_manager_peer.peer_contract, "Peer address mismatch"
+        assert message.source_address == ntt_manager_peer.peer_contract, err.PEER_ADDRESS_UNKNOWN
 
         # parse payload
         payload = message.payload
         index = UInt64(0)
-        assert Bytes.from_hex(NTT_PAYLOAD_PREFIX) == op.extract(payload, index, 4), "Incorrect prefix"
-        index += 4
-        from_decimals = ARC4UInt8(op.btoi(op.extract(payload, index, 1)))
-        index += 1
+        assert Bytes.from_hex(NTT_PAYLOAD_PREFIX) == op.extract(payload, index, const.BYTES4_LENGTH), err.PREFIX_INCORRECT
+        index += const.BYTES4_LENGTH
+        from_decimals = ARC4UInt8(op.btoi(op.extract(payload, index, const.UINT8_LENGTH)))
+        index += const.UINT8_LENGTH
         from_amount = ARC4UInt64(op.extract_uint64(payload, index))
-        index += 40 # skip source_token as never used
-        recipient = Address(op.extract(payload, index, 32))
-        index += 32
+        index += const.UINT64_LENGTH + const.BYTES32_LENGTH # skip source_token as never used
+        recipient = Address(op.extract(payload, index, const.BYTES32_LENGTH))
+        index += const.BYTES32_LENGTH
         recipient_chain = op.extract_uint16(payload, index)
         # ignore any additional payload
 
         # verify that the destination chain is valid
-        assert recipient_chain == self.chain_id.value, "Invalid target chain"
+        assert recipient_chain == self.chain_id.value, err.TARGET_CHAIN_INVALID
 
         # calculate proper amount of tokens to unlock/mint to recipient
         trimmed_amount = TrimmedAmount(from_amount, from_decimals)
@@ -439,7 +455,7 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
     @subroutine
     def _get_asset_decimals(self) -> UInt8:
         asset_decimals, exists = op.AssetParamsGet.asset_decimals(self.asset_id.value)
-        assert exists, "Asset unknown"
+        assert exists, err.ASSET_UNKNOWN
         return UInt8(asset_decimals)
 
     @subroutine
@@ -448,7 +464,7 @@ class NttManager(INttManager, MessageHandler, NttRateLimiter, Upgradeable):
 
         trimmed_amount = TrimmedAmountLib.trim(amount, from_decimals, to_decimals)
         new_amount = TrimmedAmountLib.untrim(trimmed_amount, from_decimals)
-        assert amount == new_amount, "Transfer amount has dust"
+        assert amount == new_amount, err.TRANSFER_AMOUNT_HAS_DUST
 
         return trimmed_amount
 
