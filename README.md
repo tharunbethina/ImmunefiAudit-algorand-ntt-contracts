@@ -76,3 +76,17 @@ Make sure to run the compilation commands before testing.
 npx jest tests/ntt_manager/NttManager.test.ts
 ```
 
+# POC Location
+
+The test case `"POC: Missing Asset Transfer Sender Validation - [HIGH-1] from Security Audit"` is located in:
+
+- **File:** NttManager.test.ts
+- **Describe block:** `describe("transfer", ... )`
+- **Test name:** `test("POC: Missing Asset Transfer Sender Validation - [HIGH-1] from Security Audit", async () => { ... })`
+
+**How to find it:**  
+Search for the string  
+```
+POC: Missing Asset Transfer Sender Validation - [HIGH-1]
+```
+inside the `describe("transfer", ...)` block in the NttManager.test.ts file. It is the last test in that describe block.
