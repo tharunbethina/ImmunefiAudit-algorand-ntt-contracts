@@ -1,14 +1,42 @@
-# algorand-ntt-contracts
+## Title  
+Missing Asset Transfer Sender Validation in NttManager (_HIGH-1_)
 
-## Overview
+## Summary 
+The NttManager contract enforces correct asset ID, receiver, and amount for incoming ASA transfers, but fails to validate that the asset transfer’s `sender` matches the application call’s `Txn.sender`. An attacker who holds delegated asset authority—via a LogicSig delegation—can burn tokens from a victim’s account and receive cross-chain minted tokens, even though the victim never initiated the bridge transfer.
 
-This repository contains the PuyaPy implementation for Wormhole NTT on Algorand.
+## Description
+In Algorand, atomic transaction groups may include multiple transactions signed by different parties. NttManager’s `_transfer_entry_point()` inspects only the asset ID, asset receiver, and transfer amount in the grouped `AssetTransferTxn` (referred to as `send_token`), but never checks `send_token.sender`. As a result, an attacker can submit:
 
-## Requirements
+1. A payment transaction signed by the attacker (to pay bridge fees)  
+2. An asset transfer transaction whose `sender` is the victim’s address (signed by a LogicSig that the victim delegated)  
+3. An application call signed by the attacker  
 
-- Linux or macOS
-- Python 3.12+
-- AlgoKit
+Because the contract does not verify that the asset transfer’s `sender` equals the application call’s `Txn.sender`, it treats the victim-signed asset transfer as legitimate and proceeds to burn the victim’s tokens on Algorand while minting destination tokens for the attacker.
+
+
+## Impact & Risk 
+- **Unauthorized Burns**: Victims lose delegated tokens without intending to bridge.  
+- **Cross-Chain Forgery**: Attacker receives minted tokens on destination chain.  
+- **Trust Violation**: Victim’s intent to delegate for DeFi use is subverted.  
+- **Wide Reach**: Any user who has ever delegated asset authority to a protocol could be exploited.
+
+**Suggested Mitigation**  
+Update `_transfer_entry_point()` to enforce sender consistency:
+
+```python
+# After existing asset ID/receiver/amount checks:
+assert send_token.sender == Txn.sender, err.ASSET_SENDER_UNAUTHORIZED
+```
+
+Add to `errors.py`:
+
+```python
+ASSET_SENDER_UNAUTHORIZED = "Asset sender must be transaction initiator"
+```
+
+This binds the ASA transfer’s `sender` to the application call’s `Txn.sender`, closing the delegation-based burn attack.
+
+
 
 ## Setup
 
@@ -23,18 +51,6 @@ python3 -m pip install -r requirements.txt
 ```bash
 npm install
 ```
-
-## Smart Contracts
-
-The `ntt_contracts` folder contains the following:
-
-- `ntt_contracts/external` contains the external smart contracts which are referenced but are not strictly part of the NTT implementation.
-- `ntt_contracts/library` contains library smart contracts which are used. Some of these (like OpUp) are used for testing purposes.
-- `ntt_contracts/ntt_manager` contains the smart contracts relating to the NTT manager, the entry point for users to transfer and receive tokens between chains.
-- `ntt_contracts/ntt_token` contains the smart contracts which are used to make an ASA an NTT token.
-- `ntt_contracts/transceiver` contains the smart contracts to send and receive messages between chains.
-
-In addition, there are multiple `test` folders within the `ntt_contracts` folder which are used solely for unit testing. They should not be considered safe to use.
 
 ## Compilation
 
@@ -54,16 +70,9 @@ algokit localnet start
 
 Make sure to run the compilation commands before testing.
 
-Run all tests from root directory using:
+## RUN POC
 
 ```bash
-npm run test
+npx jest tests/ntt_manager/NttManager.test.ts
 ```
 
-or single test file using:
-
-```bash
-jest <PATH_TO_TEST_FILE>
-```
-
-It is not possible to run the tests in parallel so `--runInBand` option is passed.
