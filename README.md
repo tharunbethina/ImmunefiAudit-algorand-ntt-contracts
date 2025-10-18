@@ -4,6 +4,19 @@ Missing Asset Transfer Sender Validation in NttManager (_HIGH-1_)
 ## Summary 
 The NttManager contract enforces correct asset ID, receiver, and amount for incoming ASA transfers, but fails to validate that the asset transfer’s `sender` matches the application call’s `Txn.sender`. An attacker who holds delegated asset authority—via a LogicSig delegation—can burn tokens from a victim’s account and receive cross-chain minted tokens, even though the victim never initiated the bridge transfer.
 
+## Vulnerability location
+**Location:** `ntt_contracts/ntt_manager/NttManager.py:318-323`  
+**Function:** `_transfer_entry_point()` 
+
+```python
+assert send_token.xfer_asset.id == self.asset_id.value, err.ASSET_UNKNOWN
+assert send_token.asset_receiver == ntt_token_address, err.ASSET_RECEIVER_UNKNOWN
+assert send_token.asset_amount == amount, err.ASSET_AMOUNT_INCORRECT
+
+# MISSING:
+# assert send_token.sender == Txn.sender, "Sender must be transaction initiator"
+```
+
 ## Description
 In Algorand, atomic transaction groups may include multiple transactions signed by different parties. NttManager’s `_transfer_entry_point()` inspects only the asset ID, asset receiver, and transfer amount in the grouped `AssetTransferTxn` (referred to as `send_token`), but never checks `send_token.sender`. As a result, an attacker can submit:
 
