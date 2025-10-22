@@ -1,4 +1,4 @@
-## Title  
+# FINDING 1
 Missing Asset Transfer Sender Validation in NttManager (_HIGH-1_)
 
 ## Summary 
@@ -89,7 +89,7 @@ Make sure to run the compilation commands before testing.
 npx jest tests/ntt_manager/NttManager.test.ts
 ```
 
-# POC Location
+## POC Location
 
 The test case `"POC: Missing Asset Transfer Sender Validation - [HIGH-1] from Security Audit"` is located in:
 
