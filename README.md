@@ -103,3 +103,124 @@ Search for the string
 POC: Missing Asset Transfer Sender Validation - [HIGH-1]
 ```
 inside the `describe("transfer", ...)` block in the NttManager.test.ts file. It is the last test in that describe block.
+
+
+
+# 
+#
+# FINDING 2
+Instant Threshold Changes Enable Race Attacks
+
+## Summary 
+The attestation threshold for message approval can be changed instantly with no timelock or delay mechanism. An admin can decrease the threshold after a user sends a cross-chain message but before it executes, allowing the message to execute with fewer attestations than originally required. This retroactively weakens the security model for in-flight messages, enabling governance attacks and signature requirements bypass.
+
+## Vulnerability location
+**Location:** `ntt_contracts/transceiver/MessageHandler.py:114-130`  
+**Function:** `_set_threshold()` 
+
+```python
+@subroutine
+def _set_threshold(self, new_threshold: UInt64) -> None:
+    assert new_threshold, err.ZERO_THRESHOLD
+    self.threshold.value = new_threshold  # ← INSTANT CHANGE, NO TIMELOCK!
+    emit(ThresholdUpdated(ARC4UInt64(new_threshold)))
+
+```
+Checking Logic (MessageHandler.py:70-80):
+```python
+@abimethod(readonly=True)
+def is_message_approved(self, message_digest: MessageDigest) -> Bool:
+    message_attestations, txn = abi_call(
+        ITransceiverManager.message_attestations,
+        message_digest,
+        app_id=self.transceiver_manager.value,
+        fee=0,
+    )
+    
+    return Bool(message_attestations > 0 and message_attestations >= self.threshold.value)
+
+```
+
+## Description
+The threshold is checked **at message execution time**, not locked **at message send time**. This creates a Time-of-Check Time-of-Use (TOCTOU) vulnerability where:
+
+1. User sends a cross-chain message expecting `threshold=3` attestations required (3 out of 4 transceivers)
+2. Only 1 transceiver attests to the message (insufficient under original threshold)
+3. Message is correctly blocked (cannot execute with only 1 attestation)
+4. Compromised/malicious admin calls `_set_threshold(1)` with **no delay or timelock**
+5. Same message now **passes** the approval check with only 1 attestation
+6. Message executes with drastically reduced security compared to user expectations
+
+
+
+## Impact & Risk 
+- **Retroactive Security Degradation**: In-flight messages execute with fewer attestations than originally required
+- **Governance Attack Vector**: Compromised admin can weaken bridge security retroactively
+- **Consensus Bypass**: Users lose multi-signature protection they were relying on
+- **Financial Risk**: High-value transfers may execute with insufficient validation
+- **No User Control**: Users cannot prevent threshold changes affecting their messages
+- **No Transparency**: No advance notice or timelock before security parameters change
+
+
+**Suggested Mitigation**  
+**Option 1: Prevent Threshold Decreases (Simplest)**
+**Option 2: Implement Timelock for Decreases (Recommended)**
+
+
+## Setup
+
+To install all required packages, run:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+python3 -m pip install -r requirements.txt
+```
+
+```bash
+npm install
+```
+
+## Compilation
+
+To generate the TEAL code, ARC56 specs and TS clients for the contracts, run the command:
+
+```bash
+npm run build
+```
+
+## Testing
+
+Start an Algorand localnet with AlgoKit and Docker using:
+
+```bash
+algokit localnet start
+```
+
+Make sure to run the compilation commands before testing.
+
+## RUN POC
+
+```bash
+npx jest tests/transceiver/MessageHandler.test.ts 
+```
+
+## POC Location
+
+The test case `"POC: Instant Threshold Changes Enable Race Attacks - [HIGH-3] from Security Audit"` is located in:
+
+- **File:** NttManager.test.ts
+- **Describe block:** `describe("POC: Instant Threshold Changes Enable Race Attacks - [HIGH-3]", () => { ... })`
+- **Test name:** `test("POC: Admin lowers threshold enabling execution with insufficient attestations", async () => { ... })`, ` test("POC: Real-world attack scenario - Bridge with 4 transceivers", async () => { ... })`
+
+**How to find it:**  
+Search for the string  
+```
+POC: Instant Threshold Changes Enable Race Attacks - [HIGH-3]
+```
+in the MessageHandler.test.ts file. The describe block contains two comprehensive test cases demonstrating:
+
+1. **Basic attack**: Threshold 2→1, showing message blocked then executed
+2. **Real-world scenario**: 4 transceivers, $1M transfer, threshold 3→2 showing financial impact
+
+Both tests include step-by-step console output clearly showing the TOCTOU vulnerability progression and attack success.
